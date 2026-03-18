@@ -1,13 +1,12 @@
 """Smoke test: full submission pipeline end-to-end."""
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.submissions import run_evaluation_pipeline
 from app.models.challenge import Challenge
 from app.models.submission import Submission
 from app.models.user import UserProfile
-from app.api.submissions import run_evaluation_pipeline
 from tests.conftest import TestSessionLocal
 
 

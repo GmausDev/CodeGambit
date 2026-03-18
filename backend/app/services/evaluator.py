@@ -45,7 +45,7 @@ class ClaudeEvaluator:
             try:
                 import anthropic
 
-                self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+                self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
             except ImportError:
                 logger.warning("anthropic package not installed; using mock mode")
 
@@ -211,9 +211,9 @@ class ClaudeEvaluator:
     async def _call_claude(
         self, system: str, user: str, model: str = EVAL_MODEL
     ) -> str:
-        """Call Claude API synchronously (anthropic SDK is sync)."""
+        """Call Claude API asynchronously."""
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=model,
                 max_tokens=2048,
                 system=system,
@@ -266,14 +266,19 @@ def _result_from_parsed(
     )
 
 
+def _clamp_score(score: int) -> int:
+    """Clamp a score to the 0-100 range."""
+    return min(100, max(0, score))
+
+
 def _mock_evaluation(mode: str) -> EvaluationResult:
     """Return reasonable mock evaluation when API key is not configured."""
     base = random.randint(60, 80)
     return EvaluationResult(
         overall_score=base,
-        architecture_score=base + random.randint(-10, 10),
-        framework_depth_score=base + random.randint(-10, 10),
-        complexity_mgmt_score=base + random.randint(-10, 10),
+        architecture_score=_clamp_score(base + random.randint(-10, 10)),
+        framework_depth_score=_clamp_score(base + random.randint(-10, 10)),
+        complexity_mgmt_score=_clamp_score(base + random.randint(-10, 10)),
         feedback_summary=(
             f"Mock evaluation ({mode} mode). "
             "Configure ANTHROPIC_API_KEY for real AI evaluation."

@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +88,67 @@ def get_all_challenges() -> dict[str, dict[str, Any]]:
 def get_challenge_by_id(challenge_id: str) -> dict[str, Any] | None:
     """Return a single challenge by id, or None."""
     return _challenges.get(challenge_id)
+
+
+async def sync_challenges_to_db(engine: AsyncEngine) -> int:
+    """Upsert all cached challenges into the challenges DB table.
+
+    Returns the number of challenges synced.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.models.challenge import Challenge
+
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    synced = 0
+
+    async with session_factory() as session:
+        for cid, data in _challenges.items():
+            result = await session.execute(
+                select(Challenge).where(Challenge.id == cid)
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                # Update existing challenge
+                existing.title = data.get("title", existing.title)
+                existing.description = data.get("description", existing.description)
+                existing.domain = data.get("domain", existing.domain)
+                existing.difficulty = data.get("difficulty", existing.difficulty)
+                existing.mode = data.get("mode", existing.mode)
+                existing.category = data.get("category", existing.category)
+                existing.tags = data.get("tags", existing.tags)
+                existing.starter_code = data.get("starter_code")
+                existing.rubric = data.get("rubric", existing.rubric)
+                existing.constraints = data.get("constraints", {})
+                existing.expected_concepts = data.get("expected_concepts", [])
+                existing.elo_target = data.get("elo_band", existing.elo_target)
+                existing.test_cases = data.get("test_cases", existing.test_cases)
+                existing.reference_solution = data.get("reference_solution")
+            else:
+                # Insert new challenge
+                challenge = Challenge(
+                    id=cid,
+                    title=data["title"],
+                    description=data["description"],
+                    domain=data["domain"],
+                    difficulty=data["difficulty"],
+                    mode=data["mode"],
+                    category=data["category"],
+                    tags=data.get("tags", []),
+                    starter_code=data.get("starter_code"),
+                    rubric=data.get("rubric", {}),
+                    constraints=data.get("constraints", {}),
+                    expected_concepts=data.get("expected_concepts", []),
+                    elo_target=data.get("elo_band", 1200),
+                    test_cases=data.get("test_cases", []),
+                    reference_solution=data.get("reference_solution"),
+                )
+                session.add(challenge)
+
+            synced += 1
+
+        await session.commit()
+
+    logger.info("Synced %d challenges to database", synced)
+    return synced

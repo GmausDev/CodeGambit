@@ -1,6 +1,5 @@
 """Unit tests for the ELO service."""
 
-import pytest
 
 from app.models.user import UserProfile
 from app.services.elo import ELOService

@@ -69,6 +69,8 @@ export default function SubmissionFlow({
   const [stderr, setStderr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+  const MAX_POLLS = 150;
 
   // Clean up polling on unmount
   useEffect(() => {
@@ -94,9 +96,20 @@ export default function SubmissionFlow({
 
       const submissionId: number = data.id;
       setStep('executing');
+      pollCountRef.current = 0;
 
       // Poll for completion
       pollRef.current = setInterval(async () => {
+        pollCountRef.current++;
+
+        if (pollCountRef.current > MAX_POLLS) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setStep('error');
+          setError('Evaluation timed out. Please try again.');
+          return;
+        }
+
         try {
           const { data: sub } = await submissionApi.get(submissionId);
           const submission = sub.submission ?? sub;

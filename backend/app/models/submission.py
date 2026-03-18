@@ -10,7 +10,9 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    challenge_id: Mapped[str] = mapped_column(String(64), ForeignKey("challenges.id"), nullable=False)
+    challenge_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("challenges.id"), nullable=False
+    )
     code: Mapped[str] = mapped_column(Text, nullable=False)
     mode: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")

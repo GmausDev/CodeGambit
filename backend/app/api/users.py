@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models.elo_history import ELOHistory
 from app.models.submission import Submission
 from app.models.user import UserProfile
 from app.schemas.user import ELOHistoryOut, UserProfileOut
@@ -22,7 +21,9 @@ async def get_profile(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(UserProfile).where(UserProfile.id == 1)
     )
-    user = result.scalar_one()
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found")
     return user
 
 
@@ -58,7 +59,9 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     user_result = await session.execute(
         select(UserProfile).where(UserProfile.id == 1)
     )
-    user = user_result.scalar_one()
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User profile not found")
 
     # Count total submissions
     sub_count_result = await session.execute(
@@ -66,9 +69,9 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     )
     total_submissions = sub_count_result.scalar() or 0
 
-    # Count completed submissions (status = 'evaluated')
+    # Count completed submissions (status = 'completed')
     completed_result = await session.execute(
-        select(func.count(Submission.id)).where(Submission.status == "evaluated")
+        select(func.count(Submission.id)).where(Submission.status == "completed")
     )
     completed = completed_result.scalar() or 0
 

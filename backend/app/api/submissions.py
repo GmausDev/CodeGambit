@@ -5,8 +5,8 @@ GET  /api/submissions/{id}     — get submission with evaluation (polling)
 POST /api/submissions/{id}/socratic-answers — submit answers to Socratic questions
 """
 
+import asyncio
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,12 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import async_session, get_session
 from app.models.challenge import Challenge
-from app.models.evaluation import Evaluation
 from app.models.elo_history import SocraticAnswers
+from app.models.evaluation import Evaluation
 from app.models.submission import Submission
+from app.models.user import UserProfile
 from app.schemas.evaluation import EvaluationOut
 from app.schemas.submission import SubmissionCreate, SubmissionOut
-from app.models.user import UserProfile
 from app.services.evaluator import ClaudeEvaluator
 
 logger = logging.getLogger(__name__)
@@ -222,6 +222,9 @@ async def run_evaluation_pipeline(submission_id: int) -> None:
             )
 
             # 5. AI evaluation
+            submission.status = "evaluating"
+            await session.commit()
+
             evaluator = ClaudeEvaluator(settings)
             eval_result = await evaluator.evaluate(
                 challenge, submission, execution_result
@@ -375,9 +378,10 @@ async def _execute_in_sandbox(
 ) -> dict:
     """Execute code in sandbox. Falls back to a stub if sandbox service is unavailable."""
     try:
-        from app.services.sandbox import execute_code, ExecutionResult
+        from app.services.sandbox import ExecutionResult, execute_code
 
-        exec_result: ExecutionResult = execute_code(
+        exec_result: ExecutionResult = await asyncio.to_thread(
+            execute_code,
             code=code,
             timeout=settings.SANDBOX_TIMEOUT,
             memory_limit=settings.SANDBOX_MEMORY_LIMIT,

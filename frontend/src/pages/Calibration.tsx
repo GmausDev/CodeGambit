@@ -107,9 +107,35 @@ export default function Calibration() {
         code,
         mode: challenge.mode ?? 'socratic',
       });
-      const score = res.data.score ?? res.data.elo_delta ?? 0;
-      setLastScore(score);
-      setPhase('result');
+      const submissionId: number = res.data.id;
+
+      // Poll for completion
+      const MAX_POLLS = 150;
+      let polls = 0;
+      const poll = async (): Promise<void> => {
+        polls++;
+        if (polls > MAX_POLLS) {
+          setError('Evaluation timed out. Please try again.');
+          setPhase('challenge');
+          return;
+        }
+        const { data: sub } = await submissionApi.get(submissionId);
+        const submission = sub.submission ?? sub;
+        if (submission.status === 'completed') {
+          const score = sub.evaluation?.overall_score ?? submission.elo_delta ?? 0;
+          setLastScore(score);
+          setPhase('result');
+          return;
+        }
+        if (submission.status === 'failed' || submission.status === 'error') {
+          setError('Evaluation failed. Please try again.');
+          setPhase('challenge');
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+        return poll();
+      };
+      await poll();
     } catch {
       setError('Submission failed. Please try again.');
       setPhase('challenge');

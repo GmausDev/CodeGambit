@@ -3,12 +3,10 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 import yaml
 
 from app.services.challenge_loader import (
     _validate_challenge,
-    get_all_challenges,
     get_challenge_by_id,
     load_challenges,
 )

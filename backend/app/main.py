@@ -3,19 +3,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.health import router as health_router
 from app.api.challenges import router as challenges_router
+from app.api.health import router as health_router
 from app.api.submissions import router as submissions_router
 from app.api.users import router as users_router
 from app.config import settings
-from app.database import init_db
-from app.services.challenge_loader import load_challenges
+from app.database import engine, init_db
+from app.services.challenge_loader import load_challenges, sync_challenges_to_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     load_challenges()
+    await sync_challenges_to_db(engine)
     yield
 
 

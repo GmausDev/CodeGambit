@@ -109,7 +109,6 @@ async def sample_challenge(session: AsyncSession) -> Challenge:
 @pytest.fixture
 def mock_evaluator(monkeypatch):
     """Mock the ClaudeEvaluator to return deterministic scores."""
-    import random
     from app.services.evaluator import EvaluationResult
 
     def mock_evaluation(mode: str) -> EvaluationResult:

@@ -3,8 +3,7 @@
 import pytest
 from httpx import AsyncClient
 
-from app.models.challenge import Challenge
-from app.services.challenge_loader import load_challenges, get_all_challenges
+from app.services.challenge_loader import get_all_challenges, load_challenges
 
 
 @pytest.fixture(autouse=True)
