@@ -17,11 +17,11 @@ interface ChallengeBriefingProps {
 }
 
 const difficultyColors: Record<string, string> = {
-  beginner: 'bg-green-600/20 text-green-400 border-green-600/30',
-  intermediate: 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30',
-  advanced: 'bg-orange-600/20 text-orange-400 border-orange-600/30',
-  expert: 'bg-red-600/20 text-red-400 border-red-600/30',
-  master: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+  beginner: 'bg-green-500/20 text-green-400 border-green-700',
+  intermediate: 'bg-blue-500/20 text-blue-400 border-blue-700',
+  advanced: 'bg-yellow-500/20 text-yellow-400 border-yellow-700',
+  expert: 'bg-orange-500/20 text-orange-400 border-orange-700',
+  master: 'bg-red-500/20 text-red-400 border-red-700',
 };
 
 const modeLabels: Record<string, string> = {

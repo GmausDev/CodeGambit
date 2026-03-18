@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,7 +17,7 @@ class ELOHistory(Base):
     elo_before: Mapped[int] = mapped_column(Integer, nullable=False)
     elo_after: Mapped[int] = mapped_column(Integer, nullable=False)
     delta: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SocraticAnswers(Base):
@@ -30,7 +30,7 @@ class SocraticAnswers(Base):
     questions: Mapped[list] = mapped_column(JSON, default=list)
     answers: Mapped[list] = mapped_column(JSON, default=list)
     answer_evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class CollaborativeSteps(Base):
@@ -44,4 +44,4 @@ class CollaborativeSteps(Base):
     step_code: Mapped[str] = mapped_column(Text, nullable=False)
     step_evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     step_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

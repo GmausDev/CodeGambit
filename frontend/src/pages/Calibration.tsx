@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Editor from '@monaco-editor/react';
+import MonacoEditor from '../components/MonacoEditor';
 import { userApi, challengeApi, submissionApi } from '../services/api';
 
 type Phase = 'loading' | 'start' | 'challenge' | 'submitting' | 'result' | 'complete';
@@ -31,12 +31,21 @@ export default function Calibration() {
   const [lastScore, setLastScore] = useState<number | null>(null);
   const [finalResults, setFinalResults] = useState<FinalResults | null>(null);
   const [error, setError] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   // Check if already calibrated on mount
   useEffect(() => {
+    const controller = new AbortController();
     async function check() {
       try {
-        const res = await userApi.getProfile();
+        const res = await userApi.getProfile({ signal: controller.signal });
         if (res.data.calibration_complete) {
           setPhase('complete');
           setFinalResults({
@@ -49,10 +58,13 @@ export default function Calibration() {
           setPhase('start');
         }
       } catch {
-        setPhase('start');
+        if (!controller.signal.aborted) {
+          setPhase('start');
+        }
       }
     }
     check();
+    return () => controller.abort();
   }, []);
 
   const loadChallenge = useCallback(async (calStep: number) => {
@@ -100,6 +112,7 @@ export default function Calibration() {
 
   const handleSubmit = async () => {
     if (!challenge) return;
+    if (pollRef.current) clearInterval(pollRef.current);
     setPhase('submitting');
     try {
       const res = await submissionApi.submit({
@@ -109,33 +122,43 @@ export default function Calibration() {
       });
       const submissionId: number = res.data.id;
 
-      // Poll for completion
+      // Poll for completion using setInterval
       const MAX_POLLS = 150;
       let polls = 0;
-      const poll = async (): Promise<void> => {
+      pollRef.current = setInterval(async () => {
         polls++;
         if (polls > MAX_POLLS) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
           setError('Evaluation timed out. Please try again.');
           setPhase('challenge');
           return;
         }
-        const { data: sub } = await submissionApi.get(submissionId);
-        const submission = sub.submission ?? sub;
-        if (submission.status === 'completed') {
-          const score = sub.evaluation?.overall_score ?? submission.elo_delta ?? 0;
-          setLastScore(score);
-          setPhase('result');
-          return;
-        }
-        if (submission.status === 'failed' || submission.status === 'error') {
-          setError('Evaluation failed. Please try again.');
+        try {
+          const { data: sub } = await submissionApi.get(submissionId);
+          const submission = sub.submission ?? sub;
+          if (submission.status === 'completed') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            const score = sub.evaluation?.overall_score ?? submission.elo_delta ?? 0;
+            setLastScore(score);
+            setPhase('result');
+            return;
+          }
+          if (submission.status === 'failed' || submission.status === 'error') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setError('Evaluation failed. Please try again.');
+            setPhase('challenge');
+            return;
+          }
+        } catch {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setError('Submission failed. Please try again.');
           setPhase('challenge');
-          return;
         }
-        await new Promise((r) => setTimeout(r, 2000));
-        return poll();
-      };
-      await poll();
+      }, 2000);
     } catch {
       setError('Submission failed. Please try again.');
       setPhase('challenge');
@@ -297,19 +320,7 @@ export default function Calibration() {
         {/* Editor */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden flex flex-col">
           <div className="flex-1 min-h-[300px]">
-            <Editor
-              defaultLanguage="python"
-              theme="vs-dark"
-              value={code}
-              onChange={(v) => setCode(v ?? '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-              }}
-            />
+            <MonacoEditor value={code} onChange={setCode} />
           </div>
           <div className="p-3 border-t border-gray-700">
             <button

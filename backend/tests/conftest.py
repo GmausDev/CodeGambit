@@ -1,6 +1,5 @@
 """Shared fixtures for CodeGambit backend tests."""
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -25,14 +24,6 @@ async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 app.dependency_overrides[get_session] = override_get_session
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Use a single event loop for the whole test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +73,7 @@ async def sample_user(session: AsyncSession) -> UserProfile:
 
 @pytest.fixture
 async def sample_challenge(session: AsyncSession) -> Challenge:
-    """Create and return a test challenge in the DB."""
+    """Create and return a test challenge in the DB with complete rubric."""
     challenge = Challenge(
         id="test-challenge-001",
         title="Test Challenge",
@@ -93,7 +84,11 @@ async def sample_challenge(session: AsyncSession) -> Challenge:
         category="training",
         tags=["test", "unit"],
         starter_code="# starter code",
-        rubric={"architecture": {"weight": 0.5}},
+        rubric={
+            "architecture": {"weight": 0.4, "description": "Solution architecture quality"},
+            "framework_depth": {"weight": 0.3, "description": "Framework API usage depth"},
+            "complexity_mgmt": {"weight": 0.3, "description": "Complexity management"},
+        },
         constraints={"time_limit": "30m"},
         expected_concepts=["testing"],
         elo_target=1200,
@@ -129,3 +124,38 @@ def mock_evaluator(monkeypatch):
     monkeypatch.setattr(
         "app.services.evaluator._mock_evaluation", mock_evaluation
     )
+
+
+@pytest.fixture
+async def calibration_challenges(session: AsyncSession) -> list[Challenge]:
+    """Create calibration challenges spanning all ELO bands."""
+    challenges = []
+    bands = [800, 1000, 1200, 1400, 1600]
+    for i, band in enumerate(bands):
+        for j in range(2):
+            idx = i * 2 + j + 1
+            ch = Challenge(
+                id=f"cal-{idx:03d}",
+                title=f"Calibration Challenge {idx}",
+                description=f"Calibration challenge for band {band}",
+                domain="python",
+                difficulty="intermediate",
+                mode="socratic",
+                category="calibration",
+                tags=["calibration"],
+                starter_code="# start",
+                rubric={
+                    "architecture": {"weight": 0.4},
+                    "framework_depth": {"weight": 0.3},
+                    "complexity_mgmt": {"weight": 0.3},
+                },
+                constraints={},
+                expected_concepts=[],
+                elo_target=band,
+                test_cases=[{"name": "basic", "code": "assert True"}],
+                reference_solution="pass",
+            )
+            session.add(ch)
+            challenges.append(ch)
+    await session.commit()
+    return challenges

@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SubmissionCreate(BaseModel):
     challenge_id: str
-    code: str
+    code: str = Field(max_length=50000)
     mode: str
 
 

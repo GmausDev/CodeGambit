@@ -9,7 +9,7 @@ from app.schemas.user import ELOHistoryOut, UserProfileOut
 from app.services.calibration import CalibrationService
 from app.services.elo import ELOService
 
-router = APIRouter(prefix="/api/user", tags=["user"])
+router = APIRouter(tags=["user"])
 
 elo_service = ELOService()
 calibration_service = CalibrationService()

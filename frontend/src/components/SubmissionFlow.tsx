@@ -82,6 +82,9 @@ export default function SubmissionFlow({
   const handleSubmit = useCallback(async () => {
     if (!code.trim()) return;
 
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+
     setStep('submitting');
     setStdout(null);
     setStderr(null);

@@ -15,11 +15,11 @@ interface Challenge {
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
-  beginner: 'bg-green-900/50 text-green-400 border-green-700',
-  intermediate: 'bg-blue-900/50 text-blue-400 border-blue-700',
-  advanced: 'bg-yellow-900/50 text-yellow-400 border-yellow-700',
-  expert: 'bg-orange-900/50 text-orange-400 border-orange-700',
-  master: 'bg-red-900/50 text-red-400 border-red-700',
+  beginner: 'bg-green-500/20 text-green-400 border-green-700',
+  intermediate: 'bg-blue-500/20 text-blue-400 border-blue-700',
+  advanced: 'bg-yellow-500/20 text-yellow-400 border-yellow-700',
+  expert: 'bg-orange-500/20 text-orange-400 border-orange-700',
+  master: 'bg-red-500/20 text-red-400 border-red-700',
 };
 
 const MODE_ICONS: Record<string, string> = {
@@ -32,22 +32,29 @@ export default function ChallengeList() {
   const navigate = useNavigate();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [diffFilter, setDiffFilter] = useState('');
   const [modeFilter, setModeFilter] = useState('');
 
   useEffect(() => {
+    const controller = new AbortController();
     async function load() {
       try {
-        const res = await challengeApi.list();
+        const res = await challengeApi.list({ signal: controller.signal });
         setChallenges(res.data.challenges ?? []);
       } catch {
-        // API unavailable
+        if (!controller.signal.aborted) {
+          setError('Failed to load challenges. Please try again later.');
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
     load();
+    return () => controller.abort();
   }, []);
 
   const filtered = challenges.filter((c) => {
@@ -74,6 +81,14 @@ export default function ChallengeList() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-red-400">{error}</div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <h2 className="text-2xl font-bold mb-6">Challenge Library</h2>
@@ -84,6 +99,7 @@ export default function ChallengeList() {
           <input
             type="text"
             placeholder="Search challenges..."
+            aria-label="Search challenges"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="flex-1 min-w-[200px] px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 text-sm focus:outline-none focus:border-brand-600"
@@ -91,7 +107,8 @@ export default function ChallengeList() {
           <select
             value={diffFilter}
             onChange={(e) => setDiffFilter(e.target.value)}
-            className="px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:border-brand-600"
+            aria-label="Filter by difficulty"
+            className="select-dark px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:border-brand-600"
           >
             <option value="">All Difficulties</option>
             {difficulties.map((d) => (
@@ -101,7 +118,8 @@ export default function ChallengeList() {
           <select
             value={modeFilter}
             onChange={(e) => setModeFilter(e.target.value)}
-            className="px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:border-brand-600"
+            aria-label="Filter by mode"
+            className="select-dark px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-sm focus:outline-none focus:border-brand-600"
           >
             <option value="">All Modes</option>
             {modes.map((m) => (
@@ -124,6 +142,7 @@ export default function ChallengeList() {
             <button
               key={c.id}
               onClick={() => navigate(`/challenge/${c.id}`)}
+              aria-label={c.title}
               className="bg-gray-800 rounded-xl p-6 border border-gray-700 hover:border-brand-600 transition-colors text-left"
             >
               <div className="flex items-start justify-between mb-3">

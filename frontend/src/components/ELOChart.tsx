@@ -5,6 +5,7 @@ import {
   YAxis,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
 } from 'recharts';
 
@@ -24,6 +25,8 @@ const LINES = [
 ] as const;
 
 export default function ELOChart({ history }: { history: HistoryPoint[] }) {
+  const showDots = history.length < 10;
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={history}>
@@ -35,13 +38,21 @@ export default function ELOChart({ history }: { history: HistoryPoint[] }) {
         <YAxis stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 11 }} />
         <Tooltip
           contentStyle={{
-            backgroundColor: '#1f2937',
+            backgroundColor: '#111827',
             border: '1px solid #374151',
             borderRadius: 8,
             color: '#e5e7eb',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
           }}
+          labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
         />
         <Legend wrapperStyle={{ color: '#d1d5db' }} />
+        <ReferenceLine
+          y={1200}
+          stroke="#4b5563"
+          strokeDasharray="6 4"
+          label={{ value: 'Start (1200)', fill: '#6b7280', fontSize: 10, position: 'insideTopRight' }}
+        />
         {LINES.map((l) => (
           <Line
             key={l.key}
@@ -50,7 +61,8 @@ export default function ELOChart({ history }: { history: HistoryPoint[] }) {
             name={l.label}
             stroke={l.color}
             strokeWidth={2}
-            dot={false}
+            dot={showDots}
+            animationDuration={1500}
           />
         ))}
       </LineChart>

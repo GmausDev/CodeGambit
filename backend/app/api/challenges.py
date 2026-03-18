@@ -1,7 +1,11 @@
 """Challenge API endpoints."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import get_session
+from app.models.submission import Submission
 from app.services.challenge_service import (
     get_calibration_challenges,
     get_challenge,
@@ -50,11 +54,25 @@ def get_challenge_by_id(challenge_id: str):
 
 
 @router.get("/challenges/{challenge_id}/reference-solution")
-def get_reference_solution(challenge_id: str):
-    """Get the reference solution for a challenge."""
+async def get_reference_solution(
+    challenge_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get the reference solution for a challenge (requires completion)."""
     challenge = get_challenge(challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
+
+    # Check that the user has completed this challenge
+    result = await session.execute(
+        select(Submission).where(
+            Submission.challenge_id == challenge_id,
+            Submission.status == "completed",
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Complete the challenge first")
+
     return {
         "challenge_id": challenge_id,
         "reference_solution": challenge.get("reference_solution", ""),

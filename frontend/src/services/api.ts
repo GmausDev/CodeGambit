@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
@@ -18,9 +18,9 @@ api.interceptors.response.use(
 );
 
 export const challengeApi = {
-  list: () => api.get('/challenges'),
-  get: (id: string) => api.get(`/challenges/${id}`),
-  getReference: (id: string) => api.get(`/challenges/${id}/reference-solution`),
+  list: (config?: AxiosRequestConfig) => api.get('/challenges', config),
+  get: (id: string, config?: AxiosRequestConfig) => api.get(`/challenges/${id}`, config),
+  getReference: (id: string, config?: AxiosRequestConfig) => api.get(`/challenges/${id}/reference-solution`, config),
 };
 
 export const submissionApi = {
@@ -32,9 +32,9 @@ export const submissionApi = {
 };
 
 export const userApi = {
-  getProfile: () => api.get('/user/profile'),
-  getEloHistory: () => api.get('/user/elo-history'),
-  getStats: () => api.get('/user/stats'),
+  getProfile: (config?: AxiosRequestConfig) => api.get('/user/profile', config),
+  getEloHistory: (config?: AxiosRequestConfig) => api.get('/user/elo-history', config),
+  getStats: (config?: AxiosRequestConfig) => api.get('/user/stats', config),
   calibrate: (step: number) => api.post(`/user/calibrate?calibration_step=${step}`),
 };
 

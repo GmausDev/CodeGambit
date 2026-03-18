@@ -46,29 +46,50 @@ function buildHistory(records: EloHistoryRecord[]): HistoryPoint[] {
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+interface StatGroup {
+  total: number;
+  completed: number;
+}
+
+interface Stats {
+  total: number;
+  completed: number;
+  byMode: Record<string, StatGroup>;
+  byDifficulty: Record<string, StatGroup>;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     async function load() {
       try {
-        const [profileRes, historyRes] = await Promise.all([
-          userApi.getProfile(),
-          userApi.getEloHistory(),
+        const [profileRes, historyRes, statsRes] = await Promise.all([
+          userApi.getProfile({ signal: controller.signal }),
+          userApi.getEloHistory({ signal: controller.signal }),
+          userApi.getStats({ signal: controller.signal }),
         ]);
         setProfile(profileRes.data);
         setHistory(buildHistory(historyRes.data));
+        setStats(statsRes.data);
       } catch {
-        setError('Failed to load dashboard data');
+        if (!controller.signal.aborted) {
+          setError('Failed to load dashboard data');
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
     load();
+    return () => controller.abort();
   }, []);
 
   if (loading) {
@@ -119,24 +140,6 @@ export default function Dashboard() {
     complexity_mgmt: profile.elo_complexity_mgmt,
   };
 
-  // Placeholder stats — a full implementation would fetch from /user/stats
-  const stats = {
-    total: profile.total_submissions,
-    completed: profile.challenges_completed,
-    byMode: {
-      Socratic: { total: 10, completed: Math.min(profile.challenges_completed, 10) },
-      Adversarial: { total: 5, completed: Math.min(Math.max(profile.challenges_completed - 10, 0), 5) },
-      Collaborative: { total: 5, completed: Math.min(Math.max(profile.challenges_completed - 15, 0), 5) },
-    },
-    byDifficulty: {
-      Beginner: { total: 4, completed: Math.min(profile.challenges_completed, 4) },
-      Intermediate: { total: 6, completed: Math.min(Math.max(profile.challenges_completed - 4, 0), 6) },
-      Advanced: { total: 6, completed: Math.min(Math.max(profile.challenges_completed - 10, 0), 6) },
-      Expert: { total: 2, completed: Math.min(Math.max(profile.challenges_completed - 16, 0), 2) },
-      Master: { total: 2, completed: Math.min(Math.max(profile.challenges_completed - 18, 0), 2) },
-    },
-  };
-
   return (
     <div>
       <div className="flex items-baseline justify-between mb-6">
@@ -170,7 +173,11 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
           <h3 className="text-lg font-semibold text-gray-300 mb-4">Challenge Progress</h3>
-          <ChallengeStats {...stats} />
+          {stats ? (
+            <ChallengeStats {...stats} />
+          ) : (
+            <div className="text-gray-500 text-sm">Stats unavailable</div>
+          )}
         </div>
         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
           <h3 className="text-lg font-semibold text-gray-300 mb-4">Recent Submissions</h3>

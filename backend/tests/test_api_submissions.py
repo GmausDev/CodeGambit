@@ -1,11 +1,22 @@
 """Integration tests for the submissions API endpoints."""
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.challenge import Challenge
 from app.models.evaluation import Evaluation
 from app.models.submission import Submission
+
+
+@pytest.fixture(autouse=True)
+def _clear_rate_limit():
+    """Reset the in-memory rate limiter between tests."""
+    from app.main import _submission_cooldowns
+
+    _submission_cooldowns.clear()
+    yield
+    _submission_cooldowns.clear()
 
 
 class TestCreateSubmission:

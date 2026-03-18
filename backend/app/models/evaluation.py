@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,4 +24,4 @@ class Evaluation(Base):
     raw_ai_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

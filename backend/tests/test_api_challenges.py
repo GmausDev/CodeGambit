@@ -2,7 +2,9 @@
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.submission import Submission
 from app.services.challenge_loader import get_all_challenges, load_challenges
 
 
@@ -59,12 +61,23 @@ class TestGetChallenge:
 
 
 class TestGetReferenceSolution:
-    async def test_get_reference_solution(self, client: AsyncClient):
+    async def test_get_reference_solution(self, client: AsyncClient, session: AsyncSession):
         """GET /api/challenges/{id}/reference-solution returns the solution."""
         all_ch = get_all_challenges()
         if not all_ch:
             pytest.skip("No challenges loaded")
         challenge_id = next(iter(all_ch))
+
+        # The endpoint requires a completed submission for this challenge
+        sub = Submission(
+            challenge_id=challenge_id,
+            code="print('done')",
+            mode="socratic",
+            status="completed",
+        )
+        session.add(sub)
+        await session.commit()
+
         resp = await client.get(f"/api/challenges/{challenge_id}/reference-solution")
         assert resp.status_code == 200
         data = resp.json()

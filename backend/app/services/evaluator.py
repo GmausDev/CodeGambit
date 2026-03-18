@@ -140,10 +140,10 @@ class ClaudeEvaluator:
         parsed = _parse_json_response(raw)
         # For initial code evaluation, return a preliminary result
         return EvaluationResult(
-            overall_score=parsed.get("overall_score", 65),
-            architecture_score=parsed.get("architecture_score", 65),
-            framework_depth_score=parsed.get("framework_depth_score", 65),
-            complexity_mgmt_score=parsed.get("complexity_mgmt_score", 65),
+            overall_score=_clamp_score(parsed.get("overall_score", 65)),
+            architecture_score=_clamp_score(parsed.get("architecture_score", 65)),
+            framework_depth_score=_clamp_score(parsed.get("framework_depth_score", 65)),
+            complexity_mgmt_score=_clamp_score(parsed.get("complexity_mgmt_score", 65)),
             feedback_summary=parsed.get(
                 "feedback_summary",
                 "Socratic questions generated. Submit answers for full evaluation.",
@@ -252,10 +252,10 @@ def _result_from_parsed(
     mode_feedback: str | None = None,
 ) -> EvaluationResult:
     return EvaluationResult(
-        overall_score=parsed.get("overall_score", 60),
-        architecture_score=parsed.get("architecture_score", 60),
-        framework_depth_score=parsed.get("framework_depth_score", 60),
-        complexity_mgmt_score=parsed.get("complexity_mgmt_score", 60),
+        overall_score=_clamp_score(parsed.get("overall_score", 60)),
+        architecture_score=_clamp_score(parsed.get("architecture_score", 60)),
+        framework_depth_score=_clamp_score(parsed.get("framework_depth_score", 60)),
+        complexity_mgmt_score=_clamp_score(parsed.get("complexity_mgmt_score", 60)),
         feedback_summary=parsed.get("feedback_summary", f"{mode} evaluation complete."),
         strengths=parsed.get("strengths", []),
         improvements=parsed.get("improvements", []),

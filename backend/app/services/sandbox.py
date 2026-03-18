@@ -4,6 +4,7 @@ Tries Docker first, falls back to subprocess with resource limits.
 """
 
 import logging
+import os
 import resource
 import subprocess
 import tempfile
@@ -61,6 +62,7 @@ def _run_docker(code: str, timeout: int, memory_limit: str) -> ExecutionResult:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         tmp_path = f.name
+    os.chmod(tmp_path, 0o600)
 
     try:
         container = client.containers.run(
@@ -88,6 +90,7 @@ def _run_docker(code: str, timeout: int, memory_limit: str) -> ExecutionResult:
         exit_code = result.get("StatusCode", -1)
 
         # OOM killed
+        container.reload()
         inspect = container.attrs
         if inspect.get("State", {}).get("OOMKilled", False):
             memory_exceeded = True
@@ -130,6 +133,7 @@ def _run_subprocess(code: str, timeout: int, memory_limit: str) -> ExecutionResu
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         tmp_path = f.name
+    os.chmod(tmp_path, 0o600)
 
     try:
         result = subprocess.run(
@@ -137,6 +141,7 @@ def _run_subprocess(code: str, timeout: int, memory_limit: str) -> ExecutionResu
             capture_output=True,
             timeout=timeout,
             preexec_fn=_make_preexec_fn(memory_bytes),
+            env={},
         )
         stdout = result.stdout.decode("utf-8", errors="replace")
         stderr = result.stderr.decode("utf-8", errors="replace")

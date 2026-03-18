@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import clsx from 'clsx';
 
 interface Evaluation {
@@ -34,17 +34,34 @@ interface ScoreBarProps {
   score: number;
 }
 
+function scoreLabel(score: number): string {
+  if (score > 80) return 'Excellent';
+  if (score > 60) return 'Good';
+  if (score > 40) return 'Fair';
+  return 'Needs Work';
+}
+
 function ScoreBar({ label, score }: ScoreBarProps) {
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setAnimate(true), 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div className="flex flex-col gap-1">
       <div className="flex justify-between text-xs">
         <span className="text-gray-400">{label}</span>
-        <span className={scoreTextColor(score)}>{score}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-gray-500">{scoreLabel(score)}</span>
+          <span className={scoreTextColor(score)}>{score}</span>
+        </span>
       </div>
       <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
         <div
-          className={clsx('h-full rounded-full transition-all', scoreColor(score))}
-          style={{ width: `${Math.min(score, 100)}%` }}
+          className={clsx('h-full rounded-full transition-all duration-1000 ease-out', scoreColor(score))}
+          style={{ width: animate ? `${Math.min(score, 100)}%` : '0%' }}
         />
       </div>
     </div>

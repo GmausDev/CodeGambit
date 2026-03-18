@@ -10,7 +10,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -197,6 +197,9 @@ async def run_evaluation_pipeline(submission_id: int) -> None:
                 logger.error("Submission %d not found in pipeline", submission_id)
                 return
 
+            if submission.status != "pending":
+                return
+
             # 2. Update status to running
             submission.status = "running"
             await session.commit()
@@ -284,6 +287,16 @@ async def run_evaluation_pipeline(submission_id: int) -> None:
                         ai_scores=ai_scores,
                     )
                     logger.info("ELO updated for submission %d", submission_id)
+
+                    # Check if this is the user's first completed submission for this challenge
+                    existing = await session.execute(
+                        select(func.count(Submission.id)).where(
+                            Submission.challenge_id == submission.challenge_id,
+                            Submission.status == "completed",
+                        )
+                    )
+                    if existing.scalar() == 0:
+                        user.challenges_completed += 1
             except Exception:
                 logger.exception("ELO update failed for submission %d (non-fatal)", submission_id)
 
@@ -359,6 +372,49 @@ async def run_socratic_phase2(submission_id: int) -> None:
                 evaluation.raw_ai_response = eval_result.raw_ai_response
                 evaluation.model_used = eval_result.model_used
                 await session.commit()
+
+                # ELO recalculation with updated scores
+                try:
+                    from app.services.elo import ELOService
+
+                    elo_service = ELOService()
+                    user_result = await session.execute(
+                        select(UserProfile).where(UserProfile.id == 1)
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user:
+                        ch_for_elo = await session.execute(
+                            select(Challenge).where(Challenge.id == submission.challenge_id)
+                        )
+                        challenge_for_elo = ch_for_elo.scalar_one_or_none()
+                        if challenge_for_elo:
+                            test_pass_rate = (
+                                1.0 if submission.sandbox_exit_code == 0 else 0.0
+                            )
+                            ai_scores = {
+                                "overall": eval_result.overall_score,
+                                "architecture": eval_result.architecture_score,
+                                "framework_depth": eval_result.framework_depth_score,
+                                "complexity_mgmt": eval_result.complexity_mgmt_score,
+                            }
+                            await elo_service.update_elo(
+                                session=session,
+                                user=user,
+                                submission_id=submission_id,
+                                challenge_elo=challenge_for_elo.elo_target,
+                                test_pass_rate=test_pass_rate,
+                                ai_scores=ai_scores,
+                            )
+                            await session.commit()
+                            logger.info(
+                                "ELO recalculated for Socratic phase 2, submission %d",
+                                submission_id,
+                            )
+                except Exception:
+                    logger.exception(
+                        "ELO recalculation failed for Socratic phase 2, submission %d (non-fatal)",
+                        submission_id,
+                    )
 
             logger.info(
                 "Socratic phase 2 complete for submission %d", submission_id
