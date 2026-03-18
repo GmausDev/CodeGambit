@@ -1,0 +1,219 @@
+id: "cal-008-multi-retriever"
+title: "Fix the Multi-Source Retriever Pipeline"
+description: |
+  A senior developer built a RAG system that retrieves from multiple sources —
+  a FAISS vector store for technical docs and a BM25 retriever for FAQ entries —
+  then merges and reranks results before passing them to the LLM. But the
+  pipeline has several critical bugs.
+
+  The issues span retriever configuration, document merging logic, and the
+  LCEL chain composition. Some bugs are subtle — the code runs but returns
+  wrong or incomplete results.
+
+  Fix all bugs to make the multi-source retrieval pipeline work correctly.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "adversarial"
+category: "calibration"
+tags: ["rag", "retriever", "ensemble", "multi-source", "debugging"]
+estimated_minutes: 30
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+  from langchain_community.vectorstores import FAISS
+  from langchain_community.retrievers import BM25Retriever
+  from langchain.retrievers import EnsembleRetriever
+  from langchain_core.documents import Document
+
+  # Technical docs
+  tech_docs = [
+      Document(page_content="LCEL chains use the pipe operator for composition.",
+               metadata={"source": "tech"}),
+      Document(page_content="RunnableParallel runs multiple chains simultaneously.",
+               metadata={"source": "tech"}),
+      Document(page_content="RunnablePassthrough passes input through unchanged.",
+               metadata={"source": "tech"}),
+  ]
+
+  # FAQ entries
+  faq_docs = [
+      Document(page_content="Q: How do I install LangChain? A: pip install langchain",
+               metadata={"source": "faq"}),
+      Document(page_content="Q: What Python version? A: Python 3.9+",
+               metadata={"source": "faq"}),
+      Document(page_content="Q: How do I use LCEL? A: Use the | pipe operator between runnables.",
+               metadata={"source": "faq"}),
+  ]
+
+  embeddings = OpenAIEmbeddings()
+
+  # Bug 1: Creating FAISS from faq_docs instead of tech_docs
+  vectorstore = FAISS.from_documents(faq_docs, embeddings)
+  vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+  # Bug 2: BM25Retriever.from_documents has wrong k parameter name
+  bm25_retriever = BM25Retriever.from_documents(tech_docs)
+  bm25_retriever.k = 2  # correct way, but this line is missing below
+
+  # Bug 3: EnsembleRetriever weights don't sum to 1.0 and are reversed
+  ensemble = EnsembleRetriever(
+      retrievers=[vector_retriever, bm25_retriever],
+      weights=[0.7, 0.5]  # Weights sum to 1.2, should be [0.5, 0.5] or [0.4, 0.6]
+  )
+
+  def format_docs(docs):
+      # Bug 4: Not deduplicating documents that appear in both retrievers
+      return "\n\n".join(doc.page_content for doc in docs)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "Answer based on this context:\n\n{context}"),
+      ("human", "{question}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  chain = (
+      {"context": ensemble | format_docs, "question": RunnablePassthrough()}
+      | prompt
+      | model
+      | StrOutputParser()
+  )
+
+  def ask(question: str) -> str:
+      return chain.invoke(question)
+
+bugs:
+  - id: "bug-1"
+    description: "FAISS vector store is built from faq_docs instead of tech_docs — the vector retriever searches the wrong document set"
+    severity: "critical"
+  - id: "bug-2"
+    description: "BM25Retriever is initialized from tech_docs but should use faq_docs since vector store covers tech_docs — sources should be split across retrievers"
+    severity: "critical"
+  - id: "bug-3"
+    description: "EnsembleRetriever weights [0.7, 0.5] sum to 1.2 instead of 1.0 — should be [0.5, 0.5] or another valid split"
+    severity: "major"
+  - id: "bug-4"
+    description: "format_docs does not deduplicate documents that may appear from both retrievers, leading to repeated context and wasted tokens"
+    severity: "minor"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Each retriever searches its correct document source"
+      - "EnsembleRetriever properly merges results from both sources"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "FAISS vector store indexes tech_docs, BM25 indexes faq_docs"
+      - "EnsembleRetriever weights sum to 1.0"
+      - "Chain correctly composes ensemble retriever with LCEL"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Document deduplication prevents redundant context"
+      - "Format function produces clean, readable context"
+
+socratic_questions:
+  - "When would you use an EnsembleRetriever vs a single retriever? What are the trade-offs?"
+  - "How do the weights in EnsembleRetriever affect the final ranking of documents?"
+
+test_cases:
+  - name: "Test ask returns a string"
+    code: |
+      result = ask("How do I use LCEL?")
+      assert isinstance(result, str)
+      assert len(result) > 10
+
+  - name: "Test retrieval covers both sources"
+    code: |
+      # Query that should hit both tech and FAQ sources
+      docs = ensemble.invoke("LCEL pipe operator")
+      sources = {doc.metadata.get("source") for doc in docs}
+      assert "tech" in sources or "faq" in sources, "Should retrieve from at least one source"
+
+  - name: "Test weights sum to 1.0"
+    code: |
+      total = sum(ensemble.weights)
+      assert abs(total - 1.0) < 0.01, f"Weights must sum to 1.0, got {total}"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_community.retrievers import BM25Retriever
+  from langchain.retrievers import EnsembleRetriever
+  from langchain_core.documents import Document
+
+  tech_docs = [
+      Document(page_content="LCEL chains use the pipe operator for composition.",
+               metadata={"source": "tech"}),
+      Document(page_content="RunnableParallel runs multiple chains simultaneously.",
+               metadata={"source": "tech"}),
+      Document(page_content="RunnablePassthrough passes input through unchanged.",
+               metadata={"source": "tech"}),
+  ]
+
+  faq_docs = [
+      Document(page_content="Q: How do I install LangChain? A: pip install langchain",
+               metadata={"source": "faq"}),
+      Document(page_content="Q: What Python version? A: Python 3.9+",
+               metadata={"source": "faq"}),
+      Document(page_content="Q: How do I use LCEL? A: Use the | pipe operator between runnables.",
+               metadata={"source": "faq"}),
+  ]
+
+  embeddings = OpenAIEmbeddings()
+
+  # Fix 1: FAISS indexes tech_docs (semantic search for technical content)
+  vectorstore = FAISS.from_documents(tech_docs, embeddings)
+  vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+  # Fix 2: BM25 indexes faq_docs (keyword search for FAQ)
+  bm25_retriever = BM25Retriever.from_documents(faq_docs, k=2)
+
+  # Fix 3: Weights sum to 1.0
+  ensemble = EnsembleRetriever(
+      retrievers=[vector_retriever, bm25_retriever],
+      weights=[0.5, 0.5]
+  )
+
+  def format_docs(docs):
+      # Fix 4: Deduplicate by page_content
+      seen = set()
+      unique = []
+      for doc in docs:
+          if doc.page_content not in seen:
+              seen.add(doc.page_content)
+              unique.append(doc)
+      return "\n\n".join(doc.page_content for doc in unique)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "Answer based on this context:\n\n{context}"),
+      ("human", "{question}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  chain = (
+      {"context": ensemble | format_docs, "question": RunnablePassthrough()}
+      | prompt
+      | model
+      | StrOutputParser()
+  )
+
+  def ask(question: str) -> str:
+      return chain.invoke(question)
+
+constraints:
+  - "Must fix all 4 bugs"
+  - "Must use EnsembleRetriever to merge results"
+  - "Must deduplicate documents before passing to LLM"
+  - "EnsembleRetriever weights must sum to 1.0"

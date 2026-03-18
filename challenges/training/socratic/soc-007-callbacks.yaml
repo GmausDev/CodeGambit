@@ -1,0 +1,168 @@
+id: "soc-007-callbacks"
+title: "LangChain Callbacks and Observability"
+description: |
+  Build a custom callback handler that tracks LLM usage metrics across a
+  chain execution. Your handler should capture:
+  - Total tokens used (prompt + completion)
+  - Number of LLM calls made
+  - Latency per call
+  - Chain execution tree (which runnables ran in what order)
+
+  This tests your understanding of LangChain's callback system, the
+  BaseCallbackHandler class, and how callbacks propagate through LCEL chains.
+  Observability is critical for production LLM applications.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "socratic"
+category: "training"
+tags: ["callbacks", "observability", "metrics", "production"]
+estimated_minutes: 25
+
+starter_code: |
+  import time
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.callbacks import BaseCallbackHandler
+  from langchain_core.outputs import LLMResult
+  from typing import Any
+
+  # TODO: Create MetricsCallbackHandler extending BaseCallbackHandler
+  # Override: on_llm_start, on_llm_end, on_chain_start, on_chain_end
+
+  # TODO: Build a multi-step chain to test with
+
+  def run_with_metrics(query: str) -> dict:
+      """Run a chain and return both the result and usage metrics."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Custom handler cleanly extends BaseCallbackHandler"
+      - "Metrics are tracked as instance variables for per-invocation isolation"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Correctly overrides on_llm_start and on_llm_end for token tracking"
+      - "Correctly overrides on_chain_start and on_chain_end for chain tracking"
+      - "Passes callback handler via config={'callbacks': [handler]}"
+      - "Extracts token usage from LLMResult in on_llm_end"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Latency is measured per-call using timestamps"
+      - "Handles chains with multiple LLM calls"
+
+socratic_questions:
+  - "How do callbacks propagate through nested LCEL chains? Does a parent chain's callback also fire for child runnables?"
+  - "What is the difference between passing callbacks in the constructor vs. in invoke(config=)?"
+  - "How would you use callbacks to implement rate limiting or cost budgeting?"
+  - "What are the trade-offs between callbacks and LangSmith for observability?"
+
+test_cases:
+  - name: "Test metrics include token count"
+    code: |
+      result = run_with_metrics("Explain Python decorators in one sentence")
+      assert "total_tokens" in result["metrics"]
+      assert result["metrics"]["total_tokens"] > 0
+
+  - name: "Test metrics include call count"
+    code: |
+      result = run_with_metrics("What is LCEL?")
+      assert "llm_calls" in result["metrics"]
+      assert result["metrics"]["llm_calls"] >= 1
+
+  - name: "Test response is included"
+    code: |
+      result = run_with_metrics("Say hello")
+      assert "response" in result
+      assert len(result["response"]) > 0
+
+reference_solution: |
+  import time
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.callbacks import BaseCallbackHandler
+  from langchain_core.outputs import LLMResult
+  from typing import Any
+  from uuid import UUID
+
+  class MetricsCallbackHandler(BaseCallbackHandler):
+      def __init__(self):
+          self.total_tokens = 0
+          self.prompt_tokens = 0
+          self.completion_tokens = 0
+          self.llm_calls = 0
+          self.chain_calls = 0
+          self.llm_latencies = []
+          self.chain_names = []
+          self._llm_start_time = {}
+
+      def on_llm_start(self, serialized: dict, prompts: list[str],
+                        *, run_id: UUID, **kwargs: Any) -> None:
+          self._llm_start_time[run_id] = time.time()
+
+      def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+          self.llm_calls += 1
+          if run_id in self._llm_start_time:
+              latency = time.time() - self._llm_start_time.pop(run_id)
+              self.llm_latencies.append(latency)
+
+          if response.llm_output and "token_usage" in response.llm_output:
+              usage = response.llm_output["token_usage"]
+              self.total_tokens += usage.get("total_tokens", 0)
+              self.prompt_tokens += usage.get("prompt_tokens", 0)
+              self.completion_tokens += usage.get("completion_tokens", 0)
+
+      def on_chain_start(self, serialized: dict, inputs: dict,
+                          *, run_id: UUID, **kwargs: Any) -> None:
+          self.chain_calls += 1
+          name = serialized.get("name", serialized.get("id", ["unknown"])[-1])
+          self.chain_names.append(name)
+
+      def on_chain_end(self, outputs: dict, *, run_id: UUID, **kwargs: Any) -> None:
+          pass
+
+      def get_metrics(self) -> dict:
+          return {
+              "total_tokens": self.total_tokens,
+              "prompt_tokens": self.prompt_tokens,
+              "completion_tokens": self.completion_tokens,
+              "llm_calls": self.llm_calls,
+              "chain_calls": self.chain_calls,
+              "avg_latency": (
+                  sum(self.llm_latencies) / len(self.llm_latencies)
+                  if self.llm_latencies else 0
+              ),
+              "chain_names": self.chain_names,
+          }
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful assistant. Be concise."),
+      ("human", "{query}")
+  ])
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  chain = prompt | model | StrOutputParser()
+
+  def run_with_metrics(query: str) -> dict:
+      """Run a chain and return both the result and usage metrics."""
+      handler = MetricsCallbackHandler()
+      response = chain.invoke(
+          {"query": query},
+          config={"callbacks": [handler]}
+      )
+      return {
+          "response": response,
+          "metrics": handler.get_metrics(),
+      }
+
+constraints:
+  - "Must extend BaseCallbackHandler from langchain_core"
+  - "Must track total_tokens, llm_calls, and latency"
+  - "Must pass callback via config, not constructor"
+  - "Must use LCEL pipe syntax for the chain"

@@ -1,0 +1,159 @@
+id: "soc-005-rag-metadata"
+title: "RAG with Metadata Filtering and Self-Query"
+description: |
+  Build an advanced RAG pipeline that supports metadata filtering. Instead of
+  purely semantic search, your retriever should understand queries like
+  "Find Python tutorials from 2024" and automatically filter by metadata
+  (language=Python, year=2024) while also doing semantic search on the content.
+
+  You will use LangChain's SelfQueryRetriever, which uses an LLM to parse
+  natural language queries into structured filters + semantic search queries.
+
+  This tests your understanding of:
+  - Document metadata schemas
+  - SelfQueryRetriever configuration
+  - AttributeInfo for describing filterable fields
+  - Combining metadata filters with vector similarity
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "socratic"
+category: "training"
+tags: ["rag", "metadata", "self-query", "filtering", "retriever"]
+estimated_minutes: 28
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.documents import Document
+  from langchain_community.vectorstores import FAISS
+  from langchain.retrievers.self_query.base import SelfQueryRetriever
+  from langchain.chains.query_constructor.schema import AttributeInfo
+
+  # Documents with rich metadata
+  documents = [
+      Document(page_content="Introduction to Python decorators and how they work",
+               metadata={"language": "python", "level": "intermediate", "year": 2024}),
+      Document(page_content="Building REST APIs with FastAPI framework",
+               metadata={"language": "python", "level": "advanced", "year": 2024}),
+      Document(page_content="Getting started with React hooks and state management",
+               metadata={"language": "javascript", "level": "beginner", "year": 2023}),
+      Document(page_content="Advanced TypeScript generics and type inference",
+               metadata={"language": "typescript", "level": "advanced", "year": 2024}),
+      Document(page_content="Python basics: variables, loops, and functions",
+               metadata={"language": "python", "level": "beginner", "year": 2023}),
+      Document(page_content="Machine learning with scikit-learn pipelines",
+               metadata={"language": "python", "level": "advanced", "year": 2024}),
+  ]
+
+  # TODO: Define AttributeInfo for each filterable metadata field
+
+  # TODO: Create the vector store
+
+  # TODO: Create the SelfQueryRetriever
+
+  def search(query: str) -> list[Document]:
+      """Search with automatic metadata filtering."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "AttributeInfo correctly describes each metadata field with type and description"
+      - "Document collection description is clear and comprehensive"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Correctly initializes SelfQueryRetriever with AttributeInfo list"
+      - "Uses FAISS vector store with OpenAIEmbeddings"
+      - "SelfQueryRetriever properly configured with llm, vectorstore, and attribute info"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles queries with no metadata filters (pure semantic search)"
+      - "Handles queries with metadata-only filters"
+
+socratic_questions:
+  - "How does SelfQueryRetriever parse a natural language query into filters? What LLM call does it make?"
+  - "What are the limitations of metadata filtering compared to full-text search?"
+  - "When would you use SelfQueryRetriever vs. manually constructing filters?"
+  - "How do you handle metadata fields with a large number of possible values?"
+  - "What happens when the LLM misinterprets the query and applies wrong filters?"
+
+test_cases:
+  - name: "Test filtered search returns relevant docs"
+    code: |
+      results = search("Python tutorials from 2024")
+      assert len(results) > 0
+      for doc in results:
+          assert doc.metadata["language"] == "python" or "python" in doc.page_content.lower()
+
+  - name: "Test semantic search without filters"
+    code: |
+      results = search("How do I use decorators?")
+      assert len(results) > 0
+      assert any("decorator" in doc.page_content.lower() for doc in results)
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.documents import Document
+  from langchain_community.vectorstores import FAISS
+  from langchain.retrievers.self_query.base import SelfQueryRetriever
+  from langchain.chains.query_constructor.schema import AttributeInfo
+
+  documents = [
+      Document(page_content="Introduction to Python decorators and how they work",
+               metadata={"language": "python", "level": "intermediate", "year": 2024}),
+      Document(page_content="Building REST APIs with FastAPI framework",
+               metadata={"language": "python", "level": "advanced", "year": 2024}),
+      Document(page_content="Getting started with React hooks and state management",
+               metadata={"language": "javascript", "level": "beginner", "year": 2023}),
+      Document(page_content="Advanced TypeScript generics and type inference",
+               metadata={"language": "typescript", "level": "advanced", "year": 2024}),
+      Document(page_content="Python basics: variables, loops, and functions",
+               metadata={"language": "python", "level": "beginner", "year": 2023}),
+      Document(page_content="Machine learning with scikit-learn pipelines",
+               metadata={"language": "python", "level": "advanced", "year": 2024}),
+  ]
+
+  metadata_field_info = [
+      AttributeInfo(
+          name="language",
+          description="The programming language of the tutorial (python, javascript, typescript)",
+          type="string",
+      ),
+      AttributeInfo(
+          name="level",
+          description="The difficulty level (beginner, intermediate, advanced)",
+          type="string",
+      ),
+      AttributeInfo(
+          name="year",
+          description="The year the tutorial was published",
+          type="integer",
+      ),
+  ]
+
+  embeddings = OpenAIEmbeddings()
+  vectorstore = FAISS.from_documents(documents, embeddings)
+
+  llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  retriever = SelfQueryRetriever.from_llm(
+      llm=llm,
+      vectorstore=vectorstore,
+      document_contents="Programming tutorials and guides",
+      metadata_field_info=metadata_field_info,
+      enable_limit=True,
+  )
+
+  def search(query: str) -> list[Document]:
+      """Search with automatic metadata filtering."""
+      return retriever.invoke(query)
+
+constraints:
+  - "Must use SelfQueryRetriever from langchain"
+  - "Must define AttributeInfo for all filterable metadata fields"
+  - "Must use FAISS vector store"
+  - "Must handle both filtered and unfiltered queries"

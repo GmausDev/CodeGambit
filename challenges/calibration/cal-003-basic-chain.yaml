@@ -1,0 +1,173 @@
+id: "cal-003-basic-chain"
+title: "Build a Multi-Step Translation Chain"
+description: |
+  Build a collaborative multi-step LCEL chain that translates text and then
+  summarizes the translation. This challenge tests your ability to compose
+  multiple chain steps together.
+
+  You will build a pipeline that:
+  1. Takes source text and a target language
+  2. Translates the text into the target language
+  3. Takes the translation and produces a one-sentence summary in English
+
+  This requires chaining two prompt-model pairs together, using LCEL's
+  RunnablePassthrough and RunnableLambda to pipe data between steps.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "collaborative"
+category: "calibration"
+tags: ["lcel", "chain-composition", "runnable", "multi-step"]
+estimated_minutes: 20
+
+steps:
+  - id: "step-1"
+    title: "Create the Translation Prompt and Chain"
+    description: |
+      Create a ChatPromptTemplate that accepts `text` and `target_language`,
+      and chain it with a ChatOpenAI model and StrOutputParser.
+  - id: "step-2"
+    title: "Create the Summary Prompt and Chain"
+    description: |
+      Create a second ChatPromptTemplate that accepts `translated_text` and
+      produces a one-sentence English summary. Chain it with the model and parser.
+  - id: "step-3"
+    title: "Compose the Full Pipeline"
+    description: |
+      Use RunnablePassthrough.assign() to pipe the translation output into the
+      summary chain. The final pipeline should accept {text, target_language}
+      and return a dict with both the translation and the summary.
+  - id: "step-4"
+    title: "Add Error Handling"
+    description: |
+      Wrap the chain with .with_fallbacks() or a RunnableLambda that handles
+      cases where the input text is empty.
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+  parser = StrOutputParser()
+
+  def build_translate_and_summarize_pipeline():
+      """Build the full translate-then-summarize pipeline."""
+      # Step 1: Translation chain
+      # TODO
+
+      # Step 2: Summary chain
+      # TODO
+
+      # Step 3: Compose into a single pipeline
+      # TODO
+
+      # Step 4: Add error handling for empty input
+      # TODO
+
+      pass
+
+  def translate_and_summarize(text: str, target_language: str) -> dict:
+      """Run the pipeline and return {translation, summary}."""
+      pipeline = build_translate_and_summarize_pipeline()
+      # TODO: invoke and return results
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Cleanly separates translation and summary into distinct chain steps"
+      - "Uses RunnablePassthrough.assign() to thread data between steps"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Correctly composes two prompt|model|parser chains using LCEL"
+      - "Uses StrOutputParser to extract text from AIMessages"
+      - "Properly maps output of step 1 as input to step 2"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles empty input gracefully"
+      - "Returns structured output with both translation and summary"
+
+socratic_questions:
+  - "How does RunnablePassthrough.assign() differ from RunnableParallel?"
+  - "What happens to the original input variables after the first chain step in an LCEL pipeline?"
+  - "How would you modify this pipeline to support streaming the final output?"
+
+test_cases:
+  - name: "Test pipeline returns both translation and summary"
+    code: |
+      result = translate_and_summarize("Hello, how are you?", "Spanish")
+      assert isinstance(result, dict), "Must return a dict"
+      assert "translation" in result, "Must include 'translation' key"
+      assert "summary" in result, "Must include 'summary' key"
+
+  - name: "Test translation is non-empty"
+    code: |
+      result = translate_and_summarize("The weather is nice today.", "French")
+      assert len(result["translation"]) > 5, "Translation must be substantive"
+      assert len(result["summary"]) > 5, "Summary must be substantive"
+
+  - name: "Test empty input handling"
+    code: |
+      result = translate_and_summarize("", "German")
+      assert result is not None, "Must handle empty input without crashing"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+  parser = StrOutputParser()
+
+  def build_translate_and_summarize_pipeline():
+      """Build the full translate-then-summarize pipeline."""
+      # Step 1: Translation chain
+      translate_prompt = ChatPromptTemplate.from_messages([
+          ("system", "You are a professional translator. Translate accurately."),
+          ("human", "Translate the following text to {target_language}:\n\n{text}")
+      ])
+      translate_chain = translate_prompt | model | parser
+
+      # Step 2: Summary chain
+      summary_prompt = ChatPromptTemplate.from_messages([
+          ("system", "You summarize text concisely in English."),
+          ("human", "Summarize this translated text in one sentence:\n\n{translated_text}")
+      ])
+      summary_chain = summary_prompt | model | parser
+
+      # Step 3: Compose into a pipeline using RunnablePassthrough.assign()
+      pipeline = (
+          RunnablePassthrough.assign(translation=translate_chain)
+          | RunnablePassthrough.assign(
+              summary=lambda x: summary_chain.invoke(
+                  {"translated_text": x["translation"]}
+              )
+          )
+      )
+
+      # Step 4: Wrap with empty input handling
+      def handle_input(inputs):
+          if not inputs.get("text", "").strip():
+              return {"translation": "", "summary": "No input provided."}
+          return pipeline.invoke(inputs)
+
+      return RunnableLambda(handle_input)
+
+  def translate_and_summarize(text: str, target_language: str) -> dict:
+      """Run the pipeline and return {translation, summary}."""
+      pipeline = build_translate_and_summarize_pipeline()
+      result = pipeline.invoke({"text": text, "target_language": target_language})
+      return {"translation": result["translation"], "summary": result["summary"]}
+
+constraints:
+  - "Must use LCEL pipe syntax for chain composition"
+  - "Must use RunnablePassthrough or RunnableParallel for data threading"
+  - "Must return a dict with 'translation' and 'summary' keys"
+  - "Must handle empty input without raising an exception"

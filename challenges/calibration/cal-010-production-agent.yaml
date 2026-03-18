@@ -1,0 +1,294 @@
+id: "cal-010-production-agent"
+title: "Build a Production-Grade Research Agent"
+description: |
+  Build a production-grade research agent using LangGraph that can search the
+  web, take notes, and synthesize findings into a structured report. This is
+  the most complex calibration challenge.
+
+  Your agent should implement a multi-step research workflow:
+  1. Plan: Break the research question into sub-questions
+  2. Research: Use tools to gather information for each sub-question
+  3. Synthesize: Combine findings into a coherent report
+  4. Review: Check the report for completeness and accuracy
+
+  This tests your ability to build complex, stateful LangGraph applications
+  with multiple tools, conditional routing, and proper error handling.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "master"
+elo_band: 1600
+mode: "collaborative"
+category: "calibration"
+tags: ["langgraph", "agent", "production", "workflow", "tools", "research"]
+estimated_minutes: 45
+
+steps:
+  - id: "step-1"
+    title: "Define State and Tools"
+    description: |
+      Define a TypedDict state with fields: query (str), sub_questions (list[str]),
+      findings (list[str]), report (str), review_passed (bool).
+      Create mock tools: web_search and note_taker.
+  - id: "step-2"
+    title: "Build the Planning Node"
+    description: |
+      Create a node that takes the research query and breaks it into 3-5
+      sub-questions using an LLM. Store them in state["sub_questions"].
+  - id: "step-3"
+    title: "Build the Research Node"
+    description: |
+      Create a node that iterates over sub_questions, uses the web_search
+      tool for each, and stores findings. Use a ReAct sub-agent or a simple
+      tool-calling loop.
+  - id: "step-4"
+    title: "Build Synthesis and Review Nodes"
+    description: |
+      Synthesis node: combine all findings into a structured report.
+      Review node: check if the report adequately addresses all sub-questions.
+      If review fails, route back to research with additional questions.
+  - id: "step-5"
+    title: "Assemble the Graph"
+    description: |
+      Connect all nodes with edges. Add conditional edge from review node:
+      if review_passed, go to END; otherwise, loop back to research.
+      Add a max iteration guard to prevent infinite loops.
+
+starter_code: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.tools import tool
+  from langgraph.graph import StateGraph, END
+  import operator
+
+  # TODO: Define ResearchState TypedDict
+
+  # TODO: Define tools (web_search, note_taker)
+
+  # TODO: Build nodes (planner, researcher, synthesizer, reviewer)
+
+  # TODO: Assemble and compile the graph
+
+  def research(query: str) -> dict:
+      """Run the research agent on a query and return the report."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clean TypedDict state with all required fields"
+      - "Proper separation of concerns: each node does one thing"
+      - "Graph has a clear plan -> research -> synthesize -> review flow"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses StateGraph with TypedDict state"
+      - "Conditional edges implement the review loop correctly"
+      - "Tools are properly defined and used within nodes"
+      - "State updates use return-dict pattern (not mutation)"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Includes max iteration guard to prevent infinite loops"
+      - "Handles edge cases (empty findings, failed review)"
+      - "Report is structured with sections for each sub-question"
+
+socratic_questions:
+  - "How do you prevent infinite loops in a LangGraph workflow that has cycles?"
+  - "What are the trade-offs between using a ReAct sub-agent for research vs. a simple tool-calling loop?"
+  - "How would you add streaming support so the user sees partial results?"
+  - "How would you persist the state so a long research session can be resumed?"
+
+test_cases:
+  - name: "Test research returns a report"
+    code: |
+      result = research("What are the benefits of RAG in LLM applications?")
+      assert isinstance(result, dict)
+      assert "report" in result
+      assert len(result["report"]) > 100, "Report should be substantive"
+
+  - name: "Test sub_questions are generated"
+    code: |
+      result = research("How does LangGraph handle state management?")
+      assert "sub_questions" in result
+      assert len(result["sub_questions"]) >= 2, "Should generate at least 2 sub-questions"
+
+  - name: "Test review loop terminates"
+    code: |
+      # Should not hang — max iterations guard should prevent infinite loops
+      import signal
+      def timeout_handler(signum, frame):
+          raise TimeoutError("Research took too long")
+      signal.signal(signal.SIGALRM, timeout_handler)
+      signal.alarm(60)
+      result = research("Explain LCEL")
+      signal.alarm(0)
+      assert result["review_passed"] is True or "report" in result
+
+reference_solution: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.tools import tool
+  from langgraph.graph import StateGraph, END
+  import operator
+  import json
+
+  class ResearchState(TypedDict):
+      query: str
+      sub_questions: list[str]
+      findings: list[str]
+      report: str
+      review_passed: bool
+      iterations: int
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+
+  @tool
+  def web_search(query: str) -> str:
+      """Search the web for information on a topic. Returns relevant text."""
+      # Mock implementation — in production, use Tavily or SerpAPI
+      return (
+          f"Search results for '{query}': LangChain provides a framework for "
+          f"building LLM applications. Key concepts include LCEL, agents, RAG, "
+          f"and LangGraph for stateful workflows. {query} is commonly used in "
+          f"modern AI application development."
+      )
+
+  @tool
+  def note_taker(note: str) -> str:
+      """Save a research note for later synthesis."""
+      return f"Note saved: {note}"
+
+  # Planning node
+  plan_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a research planner. Break the research query into 3-5 specific "
+       "sub-questions. Return a JSON list of strings, nothing else."),
+      ("human", "Research query: {query}")
+  ])
+  plan_chain = plan_prompt | model | parser
+
+  def planner_node(state: ResearchState) -> dict:
+      raw = plan_chain.invoke({"query": state["query"]})
+      try:
+          sub_questions = json.loads(raw)
+          if not isinstance(sub_questions, list):
+              sub_questions = [state["query"]]
+      except json.JSONDecodeError:
+          sub_questions = [state["query"]]
+      return {"sub_questions": sub_questions, "iterations": 0}
+
+  # Research node
+  research_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a researcher. Given search results, extract the key findings. "
+       "Be concise and factual."),
+      ("human", "Question: {question}\n\nSearch results: {results}")
+  ])
+  research_chain = research_prompt | model | parser
+
+  def researcher_node(state: ResearchState) -> dict:
+      findings = list(state.get("findings", []))
+      for question in state["sub_questions"]:
+          search_result = web_search.invoke(question)
+          finding = research_chain.invoke({
+              "question": question,
+              "results": search_result
+          })
+          findings.append(f"Q: {question}\nA: {finding}")
+      return {"findings": findings, "iterations": state.get("iterations", 0) + 1}
+
+  # Synthesis node
+  synth_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a report writer. Synthesize the research findings into a "
+       "well-structured report with sections for each sub-topic. "
+       "Include an introduction and conclusion."),
+      ("human",
+       "Original query: {query}\n\nFindings:\n{findings}")
+  ])
+  synth_chain = synth_prompt | model | parser
+
+  def synthesizer_node(state: ResearchState) -> dict:
+      findings_text = "\n\n".join(state["findings"])
+      report = synth_chain.invoke({
+          "query": state["query"],
+          "findings": findings_text
+      })
+      return {"report": report}
+
+  # Review node
+  review_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a report reviewer. Check if the report adequately addresses "
+       "all sub-questions. Respond with exactly 'PASS' or 'FAIL'."),
+      ("human",
+       "Sub-questions: {sub_questions}\n\nReport:\n{report}")
+  ])
+  review_chain = review_prompt | model | parser
+
+  def reviewer_node(state: ResearchState) -> dict:
+      result = review_chain.invoke({
+          "sub_questions": "\n".join(state["sub_questions"]),
+          "report": state["report"]
+      })
+      return {"review_passed": "pass" in result.strip().lower()}
+
+  # Router
+  def review_router(state: ResearchState) -> str:
+      if state["review_passed"]:
+          return "end"
+      if state.get("iterations", 0) >= 3:
+          return "end"  # Max iteration guard
+      return "research"
+
+  # Build graph
+  graph = StateGraph(ResearchState)
+
+  graph.add_node("planner", planner_node)
+  graph.add_node("researcher", researcher_node)
+  graph.add_node("synthesizer", synthesizer_node)
+  graph.add_node("reviewer", reviewer_node)
+
+  graph.set_entry_point("planner")
+  graph.add_edge("planner", "researcher")
+  graph.add_edge("researcher", "synthesizer")
+  graph.add_edge("synthesizer", "reviewer")
+
+  graph.add_conditional_edges(
+      "reviewer",
+      review_router,
+      {"end": END, "research": "researcher"}
+  )
+
+  app = graph.compile()
+
+  def research(query: str) -> dict:
+      """Run the research agent on a query and return the report."""
+      result = app.invoke({
+          "query": query,
+          "sub_questions": [],
+          "findings": [],
+          "report": "",
+          "review_passed": False,
+          "iterations": 0,
+      })
+      return {
+          "query": result["query"],
+          "sub_questions": result["sub_questions"],
+          "report": result["report"],
+          "review_passed": result["review_passed"],
+      }
+
+constraints:
+  - "Must use LangGraph StateGraph with TypedDict state"
+  - "Must include a conditional edge for the review loop"
+  - "Must include a max iteration guard (no more than 3 loops)"
+  - "Must define tools with @tool decorator"
+  - "Must not use AgentExecutor"
+  - "State updates must use return-dict pattern, not mutation"

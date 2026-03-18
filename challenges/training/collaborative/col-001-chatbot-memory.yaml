@@ -1,0 +1,250 @@
+id: "col-001-chatbot-memory"
+title: "Build a Chatbot with Persistent Memory"
+description: |
+  Build a fully-featured chatbot with persistent conversation memory,
+  personality customization, and session management. This is a realistic
+  task that combines several LangChain concepts into a cohesive application.
+
+  Your chatbot should:
+  1. Maintain conversation history per session using RunnableWithMessageHistory
+  2. Support system personality via a configurable system prompt
+  3. Allow users to start new sessions or continue existing ones
+  4. Summarize long conversations to keep context windows manageable
+  5. Support exporting and importing conversation history
+
+  Build this incrementally, step by step.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "collaborative"
+category: "training"
+tags: ["chatbot", "memory", "session", "production"]
+estimated_minutes: 30
+
+steps:
+  - id: "step-1"
+    title: "Basic Chat with History"
+    description: |
+      Create a basic chatbot that maintains conversation history. Use
+      RunnableWithMessageHistory with an in-memory ChatMessageHistory store.
+      The chat function should accept a message and session_id.
+  - id: "step-2"
+    title: "Configurable System Personality"
+    description: |
+      Add support for different chatbot personalities. The system prompt should
+      be configurable per session — e.g., "pirate", "professor", "comedian".
+      Store the personality choice alongside the session history.
+  - id: "step-3"
+    title: "Session Management"
+    description: |
+      Add functions to: list all active sessions, delete a session, and get
+      the message count for a session. This simulates a real chat application's
+      session management needs.
+  - id: "step-4"
+    title: "History Summarization"
+    description: |
+      When a conversation exceeds 20 messages, automatically summarize the
+      older messages into a single summary message to keep the context window
+      small. Preserve the last 10 messages verbatim and summarize the rest.
+  - id: "step-5"
+    title: "Export/Import"
+    description: |
+      Add functions to export a session's history as a JSON list of
+      {role, content} dicts, and to import a JSON list to restore a session.
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables.history import RunnableWithMessageHistory
+  from langchain_community.chat_message_histories import ChatMessageHistory
+  import json
+
+  # TODO: Implement step by step
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clean separation between chat logic, session management, and history"
+      - "Session store is encapsulated (not scattered global state)"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses RunnableWithMessageHistory correctly"
+      - "History summarization uses an LLM chain"
+      - "Session management functions work correctly"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "History summarization triggers at correct threshold"
+      - "Export/import produces valid JSON and restores state"
+
+socratic_questions:
+  - "How would you persist the session store to a database for a production deployment?"
+  - "What are the trade-offs between summarizing history vs. just truncating it?"
+  - "How would you handle concurrent access to the same session from multiple requests?"
+
+test_cases:
+  - name: "Test basic chat works"
+    code: |
+      response = chat("Hello!", session_id="test-1")
+      assert isinstance(response, str)
+      assert len(response) > 0
+
+  - name: "Test memory persists"
+    code: |
+      chat("My name is Alice", session_id="test-2")
+      response = chat("What's my name?", session_id="test-2")
+      assert "alice" in response.lower()
+
+  - name: "Test session management"
+    code: |
+      chat("Hello", session_id="mgmt-1")
+      chat("Hi", session_id="mgmt-2")
+      sessions = list_sessions()
+      assert "mgmt-1" in sessions
+      assert "mgmt-2" in sessions
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables.history import RunnableWithMessageHistory
+  from langchain_community.chat_message_histories import ChatMessageHistory
+  from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+  import json
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+  parser = StrOutputParser()
+
+  PERSONALITIES = {
+      "default": "You are a helpful AI assistant.",
+      "pirate": "You are a pirate AI. Respond in pirate speak with 'arr' and 'matey'.",
+      "professor": "You are a wise professor. Explain things thoroughly and academically.",
+      "comedian": "You are a comedian. Make everything funny while still being helpful.",
+  }
+
+  # Session store: session_id -> {history: ChatMessageHistory, personality: str}
+  _sessions: dict[str, dict] = {}
+
+  def _get_session(session_id: str) -> dict:
+      if session_id not in _sessions:
+          _sessions[session_id] = {
+              "history": ChatMessageHistory(),
+              "personality": "default",
+          }
+      return _sessions[session_id]
+
+  def get_session_history(session_id: str) -> ChatMessageHistory:
+      session = _get_session(session_id)
+      history = session["history"]
+      # Step 4: Auto-summarize when history exceeds threshold
+      if len(history.messages) > 20:
+          _summarize_history(session_id)
+      return history
+
+  def _summarize_history(session_id: str):
+      session = _get_session(session_id)
+      history = session["history"]
+      messages = history.messages
+
+      # Keep last 10, summarize the rest
+      to_summarize = messages[:-10]
+      to_keep = messages[-10:]
+
+      summary_prompt = ChatPromptTemplate.from_messages([
+          ("system", "Summarize this conversation concisely, preserving key facts."),
+          ("human", "{conversation}")
+      ])
+      summary_chain = summary_prompt | model | parser
+
+      convo_text = "\n".join(
+          f"{'User' if isinstance(m, HumanMessage) else 'AI'}: {m.content}"
+          for m in to_summarize
+      )
+      summary = summary_chain.invoke({"conversation": convo_text})
+
+      # Replace history with summary + recent messages
+      history.clear()
+      history.add_message(SystemMessage(content=f"Previous conversation summary: {summary}"))
+      for msg in to_keep:
+          history.add_message(msg)
+
+  def set_personality(session_id: str, personality: str):
+      session = _get_session(session_id)
+      if personality in PERSONALITIES:
+          session["personality"] = personality
+
+  def _build_chain(session_id: str):
+      session = _get_session(session_id)
+      system_msg = PERSONALITIES.get(session["personality"], PERSONALITIES["default"])
+
+      prompt = ChatPromptTemplate.from_messages([
+          ("system", system_msg),
+          MessagesPlaceholder(variable_name="history"),
+          ("human", "{input}")
+      ])
+      chain = prompt | model | parser
+      return RunnableWithMessageHistory(
+          chain,
+          get_session_history,
+          input_messages_key="input",
+          history_messages_key="history",
+      )
+
+  def chat(message: str, session_id: str = "default") -> str:
+      chain = _build_chain(session_id)
+      return chain.invoke(
+          {"input": message},
+          config={"configurable": {"session_id": session_id}},
+      )
+
+  # Step 3: Session management
+  def list_sessions() -> list[str]:
+      return list(_sessions.keys())
+
+  def delete_session(session_id: str) -> bool:
+      return _sessions.pop(session_id, None) is not None
+
+  def message_count(session_id: str) -> int:
+      if session_id not in _sessions:
+          return 0
+      return len(_sessions[session_id]["history"].messages)
+
+  # Step 5: Export/Import
+  def export_session(session_id: str) -> str:
+      if session_id not in _sessions:
+          return "[]"
+      messages = _sessions[session_id]["history"].messages
+      data = []
+      for msg in messages:
+          if isinstance(msg, HumanMessage):
+              data.append({"role": "user", "content": msg.content})
+          elif isinstance(msg, AIMessage):
+              data.append({"role": "assistant", "content": msg.content})
+          elif isinstance(msg, SystemMessage):
+              data.append({"role": "system", "content": msg.content})
+      return json.dumps(data, indent=2)
+
+  def import_session(session_id: str, json_str: str):
+      data = json.loads(json_str)
+      session = _get_session(session_id)
+      session["history"].clear()
+      for entry in data:
+          role = entry["role"]
+          content = entry["content"]
+          if role == "user":
+              session["history"].add_message(HumanMessage(content=content))
+          elif role == "assistant":
+              session["history"].add_message(AIMessage(content=content))
+          elif role == "system":
+              session["history"].add_message(SystemMessage(content=content))
+
+constraints:
+  - "Must use RunnableWithMessageHistory"
+  - "Must support per-session configurable personalities"
+  - "Must auto-summarize history when it exceeds 20 messages"
+  - "Must support export/import as JSON"
+  - "Must use LCEL pipe syntax"

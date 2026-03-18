@@ -1,0 +1,153 @@
+id: "soc-002-lcel-runnables"
+title: "LCEL Deep Dive: Composing Complex Runnables"
+description: |
+  Go beyond basic pipe syntax and explore LCEL's full power. Build a content
+  generation pipeline that uses RunnableParallel to generate multiple outputs
+  simultaneously, RunnableLambda for custom transformations, and
+  RunnablePassthrough for data threading.
+
+  Your pipeline should:
+  1. Accept a topic string
+  2. In parallel: generate a blog title, a tweet, and 3 key points
+  3. Merge all results into a structured output
+  4. Format the final output as a content brief
+
+  This tests your mastery of LCEL's Runnable primitives and how they compose.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "socratic"
+category: "training"
+tags: ["lcel", "runnable-parallel", "runnable-lambda", "composition"]
+estimated_minutes: 22
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import (
+      RunnableParallel,
+      RunnablePassthrough,
+      RunnableLambda,
+  )
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+  parser = StrOutputParser()
+
+  # TODO: Create three separate chains (title, tweet, key_points)
+
+  # TODO: Use RunnableParallel to run all three simultaneously
+
+  # TODO: Use RunnableLambda to format the merged output
+
+  def generate_content_brief(topic: str) -> dict:
+      """Generate a content brief with title, tweet, and key points."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Uses RunnableParallel to run chains concurrently"
+      - "Each sub-chain has its own prompt tuned for its output type"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Correctly uses RunnableParallel with named outputs"
+      - "Uses RunnableLambda for custom formatting/transformation"
+      - "Understands how data flows through the parallel branches"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Output is a clean dict with title, tweet, and key_points keys"
+      - "Each output type is appropriately formatted"
+
+socratic_questions:
+  - "How does RunnableParallel differ from sequential pipe composition? What are the performance implications?"
+  - "When would you use RunnableLambda vs a custom Runnable subclass?"
+  - "How does error handling work in RunnableParallel — if one branch fails, what happens to the others?"
+  - "Can you nest RunnableParallel inside another RunnableParallel? What would that look like?"
+
+test_cases:
+  - name: "Test output has all required keys"
+    code: |
+      result = generate_content_brief("machine learning")
+      assert "title" in result
+      assert "tweet" in result
+      assert "key_points" in result
+
+  - name: "Test tweet is reasonable length"
+    code: |
+      result = generate_content_brief("cloud computing")
+      assert len(result["tweet"]) <= 280, "Tweet should be tweet-length"
+
+  - name: "Test key_points is a string or list"
+    code: |
+      result = generate_content_brief("data engineering")
+      assert isinstance(result["key_points"], (str, list))
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import (
+      RunnableParallel,
+      RunnablePassthrough,
+      RunnableLambda,
+  )
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+  parser = StrOutputParser()
+
+  # Title chain
+  title_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You create catchy blog post titles. Return only the title."),
+      ("human", "Create a blog title about: {topic}")
+  ])
+  title_chain = title_prompt | model | parser
+
+  # Tweet chain
+  tweet_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You write engaging tweets. Keep it under 280 characters. Return only the tweet."),
+      ("human", "Write a tweet about: {topic}")
+  ])
+  tweet_chain = tweet_prompt | model | parser
+
+  # Key points chain
+  points_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You extract key points. Return exactly 3 bullet points, one per line."),
+      ("human", "List 3 key points about: {topic}")
+  ])
+  points_chain = points_prompt | model | parser
+
+  # Parallel execution
+  parallel = RunnableParallel(
+      title=title_chain,
+      tweet=tweet_chain,
+      key_points=points_chain,
+  )
+
+  # Format the output
+  def format_brief(results: dict) -> dict:
+      return {
+          "title": results["title"].strip(),
+          "tweet": results["tweet"].strip(),
+          "key_points": results["key_points"].strip(),
+      }
+
+  pipeline = (
+      {"topic": RunnablePassthrough()}
+      | parallel
+      | RunnableLambda(format_brief)
+  )
+
+  def generate_content_brief(topic: str) -> dict:
+      """Generate a content brief with title, tweet, and key points."""
+      return pipeline.invoke(topic)
+
+constraints:
+  - "Must use RunnableParallel for concurrent generation"
+  - "Must use RunnableLambda for at least one transformation"
+  - "Must use LCEL pipe syntax throughout"
+  - "Tweet must be 280 characters or fewer"

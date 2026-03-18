@@ -1,0 +1,222 @@
+id: "col-005-full-production-agent"
+title: "Build a Full Production Agent with Checkpointing"
+description: |
+  Build a production-ready LangGraph agent that implements all the patterns
+  needed for a real deployment: tool calling, conversation memory, state
+  checkpointing for resumability, streaming output, and error recovery.
+
+  Your agent is a "DevOps Assistant" that can:
+  1. Search documentation
+  2. Check system status (mock)
+  3. Generate runbooks
+  4. Maintain conversation context across sessions
+
+  This is the capstone challenge — it combines everything from the training
+  program into a single, production-quality application.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "master"
+elo_band: 1600
+mode: "collaborative"
+category: "training"
+tags: ["production", "langgraph", "checkpointing", "streaming", "agent"]
+estimated_minutes: 50
+
+steps:
+  - id: "step-1"
+    title: "Define State and Tools"
+    description: |
+      Define a comprehensive TypedDict state and create three tools:
+      - search_docs: searches a mock documentation store
+      - check_status: returns mock system health metrics
+      - generate_runbook: creates a step-by-step runbook from context
+  - id: "step-2"
+    title: "Build the Agent with create_react_agent"
+    description: |
+      Use create_react_agent from langgraph.prebuilt with your tools.
+      Add a system prompt that establishes the DevOps assistant persona.
+      Set recursion_limit to prevent infinite loops.
+  - id: "step-3"
+    title: "Add Memory with Checkpointing"
+    description: |
+      Add MemorySaver as a checkpointer so conversations persist across
+      invocations. Use thread_id in config to maintain separate conversations.
+      This enables the agent to remember past interactions.
+  - id: "step-4"
+    title: "Add Streaming Support"
+    description: |
+      Implement streaming output so the user sees the agent's response as
+      it's generated. Use .stream() with proper event handling.
+  - id: "step-5"
+    title: "Add Error Recovery"
+    description: |
+      Wrap tool calls with error handling so a failed tool doesn't crash
+      the entire agent. Add a fallback response when tools fail.
+
+starter_code: |
+  from typing import TypedDict
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langchain_core.messages import HumanMessage, SystemMessage
+  from langgraph.prebuilt import create_react_agent
+  from langgraph.checkpoint.memory import MemorySaver
+
+  # TODO: Implement step by step
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Tools are well-defined with clear, specific docstrings"
+      - "Agent has a clear persona and system prompt"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Uses create_react_agent with MemorySaver checkpointer"
+      - "Conversations persist via thread_id in config"
+      - "Streaming output works with .stream()"
+      - "recursion_limit prevents infinite agent loops"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Tools have error handling that returns graceful error messages"
+      - "Different thread_ids maintain separate conversation histories"
+
+socratic_questions:
+  - "How does MemorySaver differ from RunnableWithMessageHistory? When would you use each?"
+  - "What happens to checkpointed state if the agent crashes mid-execution?"
+  - "How would you replace MemorySaver with a persistent backend like PostgreSQL?"
+  - "What are the security implications of persisting agent state?"
+
+test_cases:
+  - name: "Test agent responds to questions"
+    code: |
+      result = chat("What is the status of the production system?", thread_id="test-1")
+      assert isinstance(result, str)
+      assert len(result) > 10
+
+  - name: "Test memory persists across calls"
+    code: |
+      chat("My name is Alice and I'm investigating a production issue", thread_id="test-2")
+      result = chat("What's my name?", thread_id="test-2")
+      assert "alice" in result.lower()
+
+  - name: "Test thread isolation"
+    code: |
+      chat("I'm working on service-alpha", thread_id="thread-a")
+      result = chat("What service am I working on?", thread_id="thread-b")
+      assert "alpha" not in result.lower()
+
+  - name: "Test streaming works"
+    code: |
+      chunks = list(stream_chat("Generate a brief runbook for restarting a service", thread_id="test-3"))
+      assert len(chunks) > 0
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langchain_core.messages import HumanMessage, SystemMessage
+  from langgraph.prebuilt import create_react_agent
+  from langgraph.checkpoint.memory import MemorySaver
+
+  # Step 1: Tools
+  @tool
+  def search_docs(query: str) -> str:
+      """Search the internal documentation for information about systems,
+      services, and procedures. Use this when you need to look up how
+      something works or find documentation about a service."""
+      docs = {
+          "deployment": "Deployments use blue-green strategy. Run deploy.sh with the service name.",
+          "monitoring": "Monitoring uses Grafana dashboards. Alerts go to PagerDuty.",
+          "database": "PostgreSQL 15 in RDS. Backups run daily at 2 AM UTC.",
+          "scaling": "Auto-scaling configured for 2-10 instances. CPU threshold at 70%.",
+      }
+      for key, value in docs.items():
+          if key in query.lower():
+              return value
+      return f"No documentation found for '{query}'. Try searching for: deployment, monitoring, database, or scaling."
+
+  @tool
+  def check_status(service: str) -> str:
+      """Check the health status of a service or system component.
+      Use this when asked about current system health, uptime, or metrics.
+      Input should be the service name."""
+      statuses = {
+          "api": "API Gateway: HEALTHY | Latency: 45ms | Error rate: 0.1%",
+          "database": "PostgreSQL: HEALTHY | Connections: 42/100 | Disk: 65%",
+          "cache": "Redis: HEALTHY | Memory: 2.1GB/4GB | Hit rate: 94%",
+          "queue": "RabbitMQ: WARNING | Queue depth: 15000 | Consumer lag: 30s",
+      }
+      service_lower = service.lower().strip()
+      for key, value in statuses.items():
+          if key in service_lower:
+              return value
+      return f"Status for '{service}': UNKNOWN. Available services: api, database, cache, queue"
+
+  @tool
+  def generate_runbook(task: str) -> str:
+      """Generate a step-by-step runbook for a DevOps task.
+      Use this when the user asks for procedures, steps, or how to perform
+      an operation. Input should describe the task."""
+      return (
+          f"Runbook: {task}\n"
+          f"1. Verify current state: check service health\n"
+          f"2. Notify team in #ops-alerts\n"
+          f"3. Execute the operation: {task}\n"
+          f"4. Verify success: check health again\n"
+          f"5. Update incident log\n"
+          f"6. Close notification in #ops-alerts"
+      )
+
+  # Step 2: Create agent
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  tools = [search_docs, check_status, generate_runbook]
+
+  system_prompt = (
+      "You are a DevOps assistant for a production infrastructure team. "
+      "You can search documentation, check system status, and generate runbooks. "
+      "Be concise, precise, and always verify before recommending actions. "
+      "If you're unsure, say so rather than guessing."
+  )
+
+  # Step 3: Add checkpointing
+  memory = MemorySaver()
+
+  agent = create_react_agent(
+      model,
+      tools,
+      prompt=system_prompt,
+      checkpointer=memory,
+      recursion_limit=15,
+  )
+
+  def chat(message: str, thread_id: str = "default") -> str:
+      """Send a message and get a response. Memory persists per thread_id."""
+      config = {"configurable": {"thread_id": thread_id}}
+      result = agent.invoke(
+          {"messages": [HumanMessage(content=message)]},
+          config=config,
+      )
+      return result["messages"][-1].content
+
+  # Step 4: Streaming
+  def stream_chat(message: str, thread_id: str = "default"):
+      """Stream the agent's response. Yields content chunks."""
+      config = {"configurable": {"thread_id": thread_id}}
+      for event in agent.stream(
+          {"messages": [HumanMessage(content=message)]},
+          config=config,
+          stream_mode="messages",
+      ):
+          msg, metadata = event
+          if msg.content and metadata.get("langgraph_node") == "agent":
+              yield msg.content
+
+constraints:
+  - "Must use create_react_agent from langgraph.prebuilt"
+  - "Must use MemorySaver for state checkpointing"
+  - "Must support multiple threads via thread_id"
+  - "Must implement streaming output"
+  - "Must set recursion_limit on the agent"
+  - "Tools must have descriptive docstrings"
+  - "Tools must handle errors gracefully"

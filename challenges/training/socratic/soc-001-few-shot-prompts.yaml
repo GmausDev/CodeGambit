@@ -1,0 +1,165 @@
+id: "soc-001-few-shot-prompts"
+title: "Few-Shot Prompting with Example Selectors"
+description: |
+  Build a few-shot prompting system that dynamically selects the most relevant
+  examples based on the user's input. Instead of hardcoding examples, you will
+  use LangChain's `SemanticSimilarityExampleSelector` to choose examples that
+  are most similar to the current query.
+
+  You will create a sentiment classifier that:
+  1. Has a pool of labeled examples (text -> sentiment)
+  2. Dynamically selects the 3 most relevant examples for each input
+  3. Constructs a few-shot prompt with those examples
+  4. Uses the LLM to classify the new text
+
+  This tests your understanding of FewShotChatMessagePromptTemplate,
+  example selectors, and how to integrate them into an LCEL chain.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "socratic"
+category: "training"
+tags: ["few-shot", "prompts", "example-selector", "embeddings"]
+estimated_minutes: 20
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import (
+      ChatPromptTemplate,
+      FewShotChatMessagePromptTemplate,
+  )
+  from langchain_core.example_selectors import SemanticSimilarityExampleSelector
+  from langchain_community.vectorstores import FAISS
+  from langchain_core.output_parsers import StrOutputParser
+
+  # Example pool
+  examples = [
+      {"text": "This product is amazing, I love it!", "sentiment": "positive"},
+      {"text": "Terrible experience, waste of money.", "sentiment": "negative"},
+      {"text": "It works okay, nothing special.", "sentiment": "neutral"},
+      {"text": "Best purchase I've ever made!", "sentiment": "positive"},
+      {"text": "Broken on arrival, very disappointed.", "sentiment": "negative"},
+      {"text": "It's fine, does what it says.", "sentiment": "neutral"},
+      {"text": "Exceeded my expectations, truly wonderful.", "sentiment": "positive"},
+      {"text": "Would not recommend to anyone.", "sentiment": "negative"},
+  ]
+
+  # TODO: Create a SemanticSimilarityExampleSelector using FAISS and OpenAIEmbeddings
+  #       Select k=3 examples
+
+  # TODO: Create the example prompt template (how each example is formatted)
+
+  # TODO: Create the FewShotChatMessagePromptTemplate
+
+  # TODO: Create the full prompt with system message + few-shot + human message
+
+  # TODO: Build the LCEL chain
+
+  def classify_sentiment(text: str) -> str:
+      """Classify the sentiment of the given text."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Uses SemanticSimilarityExampleSelector for dynamic example selection"
+      - "Example prompt template correctly formats each example"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Correctly initializes SemanticSimilarityExampleSelector with FAISS"
+      - "Uses FewShotChatMessagePromptTemplate with the selector"
+      - "Composes the full prompt chain with LCEL"
+      - "Example template uses ChatPromptTemplate.from_messages with human/ai roles"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Returns one of: positive, negative, neutral"
+      - "Selected examples are relevant to the input text"
+
+socratic_questions:
+  - "Why use dynamic example selection instead of always showing all examples?"
+  - "How does SemanticSimilarityExampleSelector choose which examples to include?"
+  - "What are the trade-offs between using more vs. fewer few-shot examples?"
+  - "How would you evaluate whether the example selector is choosing good examples?"
+
+test_cases:
+  - name: "Test positive sentiment classification"
+    code: |
+      result = classify_sentiment("This is the most incredible product ever!")
+      assert result.strip().lower() in ["positive", "negative", "neutral"]
+
+  - name: "Test negative sentiment classification"
+    code: |
+      result = classify_sentiment("Absolutely horrible, I want a refund.")
+      assert "negative" in result.strip().lower()
+
+  - name: "Test returns valid category"
+    code: |
+      result = classify_sentiment("It's okay I guess.")
+      assert result.strip().lower() in ["positive", "negative", "neutral"]
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import (
+      ChatPromptTemplate,
+      FewShotChatMessagePromptTemplate,
+  )
+  from langchain_core.example_selectors import SemanticSimilarityExampleSelector
+  from langchain_community.vectorstores import FAISS
+  from langchain_core.output_parsers import StrOutputParser
+
+  examples = [
+      {"text": "This product is amazing, I love it!", "sentiment": "positive"},
+      {"text": "Terrible experience, waste of money.", "sentiment": "negative"},
+      {"text": "It works okay, nothing special.", "sentiment": "neutral"},
+      {"text": "Best purchase I've ever made!", "sentiment": "positive"},
+      {"text": "Broken on arrival, very disappointed.", "sentiment": "negative"},
+      {"text": "It's fine, does what it says.", "sentiment": "neutral"},
+      {"text": "Exceeded my expectations, truly wonderful.", "sentiment": "positive"},
+      {"text": "Would not recommend to anyone.", "sentiment": "negative"},
+  ]
+
+  # Dynamic example selector
+  example_selector = SemanticSimilarityExampleSelector.from_examples(
+      examples,
+      OpenAIEmbeddings(),
+      FAISS,
+      k=3,
+      input_keys=["text"],
+  )
+
+  # Format each example as a human/ai exchange
+  example_prompt = ChatPromptTemplate.from_messages([
+      ("human", "{text}"),
+      ("ai", "{sentiment}"),
+  ])
+
+  few_shot_prompt = FewShotChatMessagePromptTemplate(
+      example_selector=example_selector,
+      example_prompt=example_prompt,
+      input_variables=["text"],
+  )
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a sentiment classifier. Classify text as exactly one of: "
+       "positive, negative, or neutral. Respond with only the classification."),
+      few_shot_prompt,
+      ("human", "{text}"),
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  chain = prompt | model | StrOutputParser()
+
+  def classify_sentiment(text: str) -> str:
+      """Classify the sentiment of the given text."""
+      return chain.invoke({"text": text}).strip().lower()
+
+constraints:
+  - "Must use SemanticSimilarityExampleSelector, not hardcoded examples"
+  - "Must use FewShotChatMessagePromptTemplate"
+  - "Must return exactly one of: positive, negative, neutral"
+  - "Must use LCEL pipe syntax"

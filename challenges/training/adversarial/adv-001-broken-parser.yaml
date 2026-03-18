@@ -1,0 +1,145 @@
+id: "adv-001-broken-parser"
+title: "Fix the Broken JSON Output Parser Chain"
+description: |
+  A developer built a chain that extracts structured data from product reviews,
+  but the output parsing keeps failing. The code has multiple issues with how
+  the output parser is configured and integrated into the chain.
+
+  The chain should parse reviews into structured JSON with fields: product_name,
+  rating (1-5), pros (list), cons (list), and verdict (recommended/not_recommended).
+
+  Find and fix all the bugs. Some are obvious, some are subtle.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "adversarial"
+category: "training"
+tags: ["output-parser", "json", "debugging", "pydantic"]
+estimated_minutes: 18
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import JsonOutputParser
+  from pydantic import BaseModel
+  from typing import List
+
+  # Bug 1: No Field descriptions — the LLM won't know what each field means
+  class ReviewAnalysis(BaseModel):
+      product_name: str
+      rating: int
+      pros: List[str]
+      cons: List[str]
+      verdict: str
+
+  parser = JsonOutputParser(pydantic_object=ReviewAnalysis)
+
+  # Bug 2: format_instructions not included in the prompt
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You analyze product reviews and extract structured data."),
+      ("human", "Analyze this review:\n\n{review}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.9)  # Bug 3: high temperature causes inconsistent JSON
+
+  # Bug 4: Parser is after StrOutputParser — StrOutputParser converts to string,
+  # then JsonOutputParser can't parse a string input
+  from langchain_core.output_parsers import StrOutputParser
+  chain = prompt | model | StrOutputParser() | parser
+
+  def analyze_review(review: str) -> dict:
+      return chain.invoke({"review": review})
+
+bugs:
+  - id: "bug-1"
+    description: "Pydantic model fields lack Field descriptions — the LLM doesn't know rating should be 1-5 or that verdict should be 'recommended'/'not_recommended'"
+    severity: "major"
+  - id: "bug-2"
+    description: "format_instructions from the parser are not included in the prompt, so the LLM doesn't know the expected JSON schema"
+    severity: "critical"
+  - id: "bug-3"
+    description: "Temperature 0.9 is too high for structured output — causes inconsistent JSON formatting and parsing failures"
+    severity: "major"
+  - id: "bug-4"
+    description: "StrOutputParser before JsonOutputParser breaks the chain — JsonOutputParser should directly receive the AIMessage from the model"
+    severity: "critical"
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Pydantic model has descriptive Field annotations"
+      - "Parser format_instructions are injected into the prompt"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Chain is prompt | model | parser (no StrOutputParser in between)"
+      - "JsonOutputParser receives AIMessage directly from the model"
+      - "Temperature is low enough for reliable JSON output (0-0.2)"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Rating is constrained to 1-5"
+      - "Verdict uses a controlled vocabulary"
+
+socratic_questions:
+  - "Why can't you chain StrOutputParser before JsonOutputParser?"
+  - "How do format_instructions help the LLM produce valid JSON?"
+
+test_cases:
+  - name: "Test valid output structure"
+    code: |
+      result = analyze_review("Great headphones! Sound quality is amazing but they're a bit heavy.")
+      assert isinstance(result, dict)
+      assert "product_name" in result
+      assert "rating" in result
+      assert isinstance(result["pros"], list)
+
+  - name: "Test rating is in valid range"
+    code: |
+      result = analyze_review("Terrible phone case, broke after one day.")
+      assert 1 <= result["rating"] <= 5
+
+  - name: "Test verdict is valid"
+    code: |
+      result = analyze_review("Decent laptop bag, good value for money.")
+      assert result["verdict"] in ["recommended", "not_recommended"]
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import JsonOutputParser
+  from pydantic import BaseModel, Field
+  from typing import List, Literal
+
+  class ReviewAnalysis(BaseModel):
+      product_name: str = Field(description="Name of the product being reviewed")
+      rating: int = Field(ge=1, le=5, description="Rating from 1 (worst) to 5 (best)")
+      pros: List[str] = Field(description="List of positive aspects mentioned")
+      cons: List[str] = Field(description="List of negative aspects mentioned")
+      verdict: Literal["recommended", "not_recommended"] = Field(
+          description="Overall recommendation verdict"
+      )
+
+  parser = JsonOutputParser(pydantic_object=ReviewAnalysis)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You analyze product reviews and extract structured data.\n\n"
+       "{format_instructions}"),
+      ("human", "Analyze this review:\n\n{review}")
+  ]).partial(format_instructions=parser.get_format_instructions())
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  chain = prompt | model | parser
+
+  def analyze_review(review: str) -> dict:
+      return chain.invoke({"review": review})
+
+constraints:
+  - "Must fix all 4 bugs"
+  - "Must include format_instructions in the prompt"
+  - "Must not chain StrOutputParser before JsonOutputParser"
+  - "Temperature must be 0.2 or lower"

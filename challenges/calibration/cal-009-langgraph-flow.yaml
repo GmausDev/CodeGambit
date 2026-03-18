@@ -1,0 +1,214 @@
+id: "cal-009-langgraph-flow"
+title: "Build a LangGraph Workflow with Conditional Routing"
+description: |
+  Build a LangGraph workflow that classifies incoming customer support messages
+  and routes them to specialized handler nodes. This tests your understanding
+  of LangGraph's core concepts: state, nodes, edges, and conditional routing.
+
+  Your workflow should:
+  1. Accept a customer message
+  2. Classify it as "billing", "technical", or "general"
+  3. Route to the appropriate handler node based on classification
+  4. Generate a specialized response
+  5. Return the response along with the classification
+
+  This requires defining a TypedDict state schema, creating node functions,
+  and using `add_conditional_edges` for dynamic routing.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "master"
+elo_band: 1600
+mode: "socratic"
+category: "calibration"
+tags: ["langgraph", "state-machine", "conditional-routing", "workflow"]
+estimated_minutes: 35
+
+starter_code: |
+  from typing import TypedDict, Literal
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+
+  # TODO: Define the state schema as a TypedDict
+  # Fields: message (str), classification (str), response (str)
+
+  # TODO: Create a classifier node that sets state["classification"]
+
+  # TODO: Create handler nodes for billing, technical, and general
+
+  # TODO: Create a router function for conditional edges
+
+  # TODO: Build the graph with StateGraph, add nodes and edges
+
+  # TODO: Compile the graph
+
+  def handle_support(message: str) -> dict:
+      """Process a customer support message through the workflow."""
+      # TODO: invoke the compiled graph
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Uses TypedDict for state schema (not plain dict)"
+      - "Clean separation between classifier node, handler nodes, and routing logic"
+      - "Graph structure follows the classify-then-route pattern"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Correctly uses StateGraph with the TypedDict state"
+      - "Uses add_conditional_edges with a router function"
+      - "Node functions correctly read and update state"
+      - "Graph is properly compiled before invocation"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Router function handles all three categories plus a fallback"
+      - "Each handler produces category-appropriate responses"
+      - "State is cleanly passed through the entire workflow"
+
+socratic_questions:
+  - "Why does LangGraph use TypedDict for state instead of plain dictionaries?"
+  - "How does add_conditional_edges differ from add_edge? When would you use each?"
+  - "What happens if the classifier returns a category the router doesn't handle?"
+  - "How would you add a human-in-the-loop approval step before the response is sent?"
+  - "How does LangGraph's state management compare to a traditional state machine?"
+
+test_cases:
+  - name: "Test billing message routing"
+    code: |
+      result = handle_support("I was charged twice for my subscription last month")
+      assert result["classification"] == "billing"
+      assert len(result["response"]) > 10
+
+  - name: "Test technical message routing"
+    code: |
+      result = handle_support("The API keeps returning 500 errors when I send POST requests")
+      assert result["classification"] == "technical"
+      assert len(result["response"]) > 10
+
+  - name: "Test general message routing"
+    code: |
+      result = handle_support("What are your office hours?")
+      assert result["classification"] == "general"
+      assert len(result["response"]) > 10
+
+reference_solution: |
+  from typing import TypedDict, Literal
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+
+  class SupportState(TypedDict):
+      message: str
+      classification: str
+      response: str
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+
+  # Classifier node
+  classify_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Classify the customer message into exactly one category: "
+       "billing, technical, or general. Respond with only the category word."),
+      ("human", "{message}")
+  ])
+  classify_chain = classify_prompt | model | parser
+
+  def classify_node(state: SupportState) -> dict:
+      classification = classify_chain.invoke({"message": state["message"]}).strip().lower()
+      if classification not in ("billing", "technical", "general"):
+          classification = "general"
+      return {"classification": classification}
+
+  # Handler nodes
+  billing_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a billing support specialist. Help the customer with their "
+       "billing concern. Be empathetic and provide clear next steps."),
+      ("human", "{message}")
+  ])
+  billing_chain = billing_prompt | model | parser
+
+  def billing_node(state: SupportState) -> dict:
+      response = billing_chain.invoke({"message": state["message"]})
+      return {"response": response}
+
+  technical_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a technical support engineer. Help the customer with their "
+       "technical issue. Provide specific troubleshooting steps."),
+      ("human", "{message}")
+  ])
+  technical_chain = technical_prompt | model | parser
+
+  def technical_node(state: SupportState) -> dict:
+      response = technical_chain.invoke({"message": state["message"]})
+      return {"response": response}
+
+  general_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a friendly customer support agent. Help the customer with "
+       "their general inquiry."),
+      ("human", "{message}")
+  ])
+  general_chain = general_prompt | model | parser
+
+  def general_node(state: SupportState) -> dict:
+      response = general_chain.invoke({"message": state["message"]})
+      return {"response": response}
+
+  # Router function
+  def route_message(state: SupportState) -> str:
+      classification = state["classification"]
+      if classification == "billing":
+          return "billing_handler"
+      elif classification == "technical":
+          return "technical_handler"
+      else:
+          return "general_handler"
+
+  # Build the graph
+  graph = StateGraph(SupportState)
+
+  graph.add_node("classifier", classify_node)
+  graph.add_node("billing_handler", billing_node)
+  graph.add_node("technical_handler", technical_node)
+  graph.add_node("general_handler", general_node)
+
+  graph.set_entry_point("classifier")
+
+  graph.add_conditional_edges(
+      "classifier",
+      route_message,
+      {
+          "billing_handler": "billing_handler",
+          "technical_handler": "technical_handler",
+          "general_handler": "general_handler",
+      }
+  )
+
+  graph.add_edge("billing_handler", END)
+  graph.add_edge("technical_handler", END)
+  graph.add_edge("general_handler", END)
+
+  app = graph.compile()
+
+  def handle_support(message: str) -> dict:
+      """Process a customer support message through the workflow."""
+      result = app.invoke({"message": message, "classification": "", "response": ""})
+      return {
+          "classification": result["classification"],
+          "response": result["response"],
+      }
+
+constraints:
+  - "Must use TypedDict for LangGraph state"
+  - "Must use StateGraph and add_conditional_edges"
+  - "Must have separate handler nodes for each category"
+  - "Must compile the graph before invocation"
+  - "Router must handle unknown classifications gracefully"

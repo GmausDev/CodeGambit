@@ -1,0 +1,127 @@
+id: "cal-002-simple-prompt"
+title: "Fix the Broken Prompt Template"
+description: |
+  You've inherited a LangChain application that generates product descriptions,
+  but it's broken. The original developer made several mistakes in the prompt
+  template and chain construction.
+
+  Your task is to identify and fix all the bugs so the chain correctly generates
+  a product description given a `product_name` and `target_audience`.
+
+  The bugs range from using deprecated APIs to incorrect template variable
+  references. Read the code carefully and fix each issue.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "beginner"
+elo_band: 800
+mode: "adversarial"
+category: "calibration"
+tags: ["prompt-template", "debugging", "lcel", "basics"]
+estimated_minutes: 12
+
+buggy_code: |
+  from langchain.llms import OpenAI
+  from langchain.prompts import PromptTemplate
+  from langchain.chains import LLMChain
+
+  # Bug 1: Using deprecated PromptTemplate instead of ChatPromptTemplate
+  # Bug 2: Using deprecated OpenAI (completions) instead of ChatOpenAI
+  template = PromptTemplate(
+      input_variables=["product", "audience"],
+      template="Write a compelling description for {product_name} targeting {target_audience}."
+  )
+
+  # Bug 3: input_variables don't match template placeholders
+  llm = OpenAI(temperature=0.7)
+
+  # Bug 4: Using deprecated LLMChain instead of LCEL pipe syntax
+  chain = LLMChain(llm=llm, prompt=template)
+
+  def generate_description(product_name: str, target_audience: str) -> str:
+      result = chain.run(product=product_name, audience=target_audience)
+      return result
+
+bugs:
+  - id: "bug-1"
+    description: "Uses deprecated PromptTemplate and langchain.prompts import instead of ChatPromptTemplate from langchain_core.prompts"
+    severity: "major"
+  - id: "bug-2"
+    description: "Uses deprecated OpenAI completions model from langchain.llms instead of ChatOpenAI from langchain_openai"
+    severity: "critical"
+  - id: "bug-3"
+    description: "input_variables list has 'product' and 'audience' but template uses {product_name} and {target_audience} — variable name mismatch"
+    severity: "critical"
+  - id: "bug-4"
+    description: "Uses deprecated LLMChain class instead of LCEL pipe syntax (prompt | model)"
+    severity: "major"
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Correctly migrates from PromptTemplate to ChatPromptTemplate"
+      - "Uses proper import paths from langchain_core and langchain_openai"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Replaces LLMChain with LCEL pipe syntax"
+      - "Fixes variable name mismatch between input_variables and template placeholders"
+      - "Uses ChatOpenAI instead of OpenAI completions"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "All deprecated imports removed"
+      - "Chain invocation uses .invoke() with correct dict keys"
+
+socratic_questions:
+  - "Why did LangChain deprecate LLMChain in favor of LCEL? What advantages does the pipe syntax offer?"
+  - "What is the difference between the langchain, langchain_core, and langchain_openai packages?"
+
+test_cases:
+  - name: "Test no deprecated imports"
+    code: |
+      import ast, inspect
+      source = inspect.getsource(generate_description)
+      # Check the module-level code doesn't use deprecated imports
+      assert "langchain.llms" not in open(__file__).read(), "Must not import from langchain.llms"
+      assert "langchain.chains" not in open(__file__).read(), "Must not import from langchain.chains"
+
+  - name: "Test chain accepts correct variables"
+    code: |
+      result = generate_description("Wireless Headphones", "remote workers")
+      assert isinstance(result, str), "Must return a string"
+      assert len(result) > 20, "Description should be substantive"
+
+  - name: "Test uses ChatPromptTemplate"
+    code: |
+      import inspect
+      source = open(__file__).read()
+      assert "ChatPromptTemplate" in source, "Must use ChatPromptTemplate"
+      assert "ChatOpenAI" in source, "Must use ChatOpenAI"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are an expert copywriter."),
+      ("human", "Write a compelling description for {product_name} targeting {target_audience}.")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+
+  chain = prompt | model | StrOutputParser()
+
+  def generate_description(product_name: str, target_audience: str) -> str:
+      result = chain.invoke({
+          "product_name": product_name,
+          "target_audience": target_audience
+      })
+      return result
+
+constraints:
+  - "Must fix all 4 identified bugs"
+  - "Must not use any deprecated LangChain APIs"
+  - "Must use LCEL pipe syntax"
+  - "Final code must be fully functional"

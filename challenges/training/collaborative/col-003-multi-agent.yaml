@@ -1,0 +1,271 @@
+id: "col-003-multi-agent"
+title: "Build a Multi-Agent System with LangGraph"
+description: |
+  Build a multi-agent system using LangGraph where specialized agents
+  collaborate to process a complex request. Each agent has its own tools
+  and expertise, and a supervisor agent routes tasks to the right specialist.
+
+  Your system should have:
+  1. A Supervisor agent that analyzes requests and delegates to specialists
+  2. A Research agent with web search capabilities
+  3. A Code agent with code generation and execution capabilities
+  4. A Writer agent that produces polished final output
+
+  The supervisor orchestrates the workflow: it reads the request, decides which
+  agent(s) to invoke, collects their outputs, and decides when the task is complete.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "collaborative"
+category: "training"
+tags: ["multi-agent", "langgraph", "supervisor", "orchestration"]
+estimated_minutes: 40
+
+steps:
+  - id: "step-1"
+    title: "Define Agent State and Supervisor"
+    description: |
+      Define a TypedDict state with fields: task (str), messages (list),
+      next_agent (str), agent_outputs (dict), final_output (str), iteration (int).
+      Create the supervisor node that decides which agent to invoke next.
+  - id: "step-2"
+    title: "Build Specialist Agents"
+    description: |
+      Create three specialist agent nodes:
+      - research_agent: has a web_search tool, gathers information
+      - code_agent: has a code_execute tool, writes and tests code
+      - writer_agent: takes gathered info and produces polished output
+      Each agent should update agent_outputs with its results.
+  - id: "step-3"
+    title: "Wire the Graph"
+    description: |
+      Connect all nodes with edges. The supervisor routes to specialists via
+      conditional edges. After each specialist completes, control returns to
+      the supervisor. The supervisor decides to invoke another agent or finish.
+  - id: "step-4"
+    title: "Add Safety Guards"
+    description: |
+      Add a maximum iteration limit (5) to prevent infinite loops.
+      Add input validation. Ensure the supervisor eventually terminates.
+
+starter_code: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.tools import tool
+  from langgraph.graph import StateGraph, END
+  import operator
+
+  # TODO: Implement step by step
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clear supervisor + specialist pattern"
+      - "Each agent has focused responsibilities and tools"
+      - "State cleanly tracks which agents have run and their outputs"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses LangGraph StateGraph with TypedDict state"
+      - "Supervisor uses conditional edges to route to specialists"
+      - "After each specialist, control returns to supervisor"
+      - "Supervisor can invoke the same agent again or a different one"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Max iteration guard prevents infinite loops"
+      - "Supervisor has clear termination criteria"
+
+socratic_questions:
+  - "How does the supervisor decide which agent to call next? What information does it use?"
+  - "What are the trade-offs between a supervisor pattern and a sequential pipeline?"
+  - "How would you handle failures in individual agents without crashing the whole system?"
+  - "How would you add human-in-the-loop approval before certain agent actions?"
+
+test_cases:
+  - name: "Test system handles research request"
+    code: |
+      result = process_request("Research the benefits of microservices architecture")
+      assert isinstance(result, dict)
+      assert "final_output" in result
+      assert len(result["final_output"]) > 50
+
+  - name: "Test system handles code request"
+    code: |
+      result = process_request("Write a Python function to calculate fibonacci numbers")
+      assert "final_output" in result
+      assert "def" in result["final_output"] or "fibonacci" in result["final_output"].lower()
+
+  - name: "Test iteration limit"
+    code: |
+      result = process_request("Do an extremely complex multi-step analysis")
+      assert result.get("iteration", 0) <= 5
+
+reference_solution: |
+  from typing import TypedDict, Annotated, Literal
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.tools import tool
+  from langgraph.graph import StateGraph, END
+  import operator
+  import json
+
+  class AgentState(TypedDict):
+      task: str
+      next_agent: str
+      agent_outputs: dict
+      final_output: str
+      iteration: int
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+
+  MAX_ITERATIONS = 5
+
+  # Tools
+  @tool
+  def web_search(query: str) -> str:
+      """Search the web for information. Returns relevant search results."""
+      return f"Search results for '{query}': Found relevant information about {query}."
+
+  @tool
+  def code_execute(code: str) -> str:
+      """Execute Python code and return the output. Use for testing code snippets."""
+      return f"Code executed successfully. Output: [code result for: {code[:50]}...]"
+
+  # Supervisor node
+  supervisor_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a supervisor managing specialist agents. Based on the task and "
+       "current progress, decide which agent to call next.\n\n"
+       "Available agents: researcher, coder, writer, FINISH\n\n"
+       "Respond with ONLY the agent name. Use FINISH when the task is complete.\n\n"
+       "Current agent outputs: {agent_outputs}"),
+      ("human", "Task: {task}")
+  ])
+  supervisor_chain = supervisor_prompt | model | parser
+
+  def supervisor_node(state: AgentState) -> dict:
+      if state["iteration"] >= MAX_ITERATIONS:
+          return {"next_agent": "FINISH"}
+
+      result = supervisor_chain.invoke({
+          "task": state["task"],
+          "agent_outputs": json.dumps(state.get("agent_outputs", {})),
+      })
+      next_agent = result.strip().lower()
+
+      valid = {"researcher", "coder", "writer", "finish"}
+      if next_agent not in valid:
+          next_agent = "finish"
+      return {"next_agent": next_agent, "iteration": state["iteration"] + 1}
+
+  # Research agent
+  research_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a research specialist. Gather key information about the topic."),
+      ("human", "{task}")
+  ])
+  research_chain = research_prompt | model | parser
+
+  def researcher_node(state: AgentState) -> dict:
+      search_result = web_search.invoke(state["task"])
+      analysis = research_chain.invoke({"task": f"{state['task']}\n\nSearch results: {search_result}"})
+      outputs = dict(state.get("agent_outputs", {}))
+      outputs["research"] = analysis
+      return {"agent_outputs": outputs}
+
+  # Code agent
+  code_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a coding specialist. Write clean, documented Python code."),
+      ("human", "Task: {task}\nContext: {context}")
+  ])
+  code_chain = code_prompt | model | parser
+
+  def coder_node(state: AgentState) -> dict:
+      context = json.dumps(state.get("agent_outputs", {}))
+      code = code_chain.invoke({"task": state["task"], "context": context})
+      outputs = dict(state.get("agent_outputs", {}))
+      outputs["code"] = code
+      return {"agent_outputs": outputs}
+
+  # Writer agent
+  writer_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a writing specialist. Produce polished, well-structured output "
+       "combining all available information."),
+      ("human", "Task: {task}\nAvailable information: {info}")
+  ])
+  writer_chain = writer_prompt | model | parser
+
+  def writer_node(state: AgentState) -> dict:
+      info = json.dumps(state.get("agent_outputs", {}))
+      output = writer_chain.invoke({"task": state["task"], "info": info})
+      outputs = dict(state.get("agent_outputs", {}))
+      outputs["writing"] = output
+      return {"agent_outputs": outputs, "final_output": output}
+
+  # Router
+  def route_supervisor(state: AgentState) -> str:
+      next_agent = state.get("next_agent", "finish").lower()
+      if next_agent == "researcher":
+          return "researcher"
+      elif next_agent == "coder":
+          return "coder"
+      elif next_agent == "writer":
+          return "writer"
+      else:
+          return "end"
+
+  # Build graph
+  graph = StateGraph(AgentState)
+
+  graph.add_node("supervisor", supervisor_node)
+  graph.add_node("researcher", researcher_node)
+  graph.add_node("coder", coder_node)
+  graph.add_node("writer", writer_node)
+
+  graph.set_entry_point("supervisor")
+
+  graph.add_conditional_edges(
+      "supervisor",
+      route_supervisor,
+      {
+          "researcher": "researcher",
+          "coder": "coder",
+          "writer": "writer",
+          "end": END,
+      }
+  )
+
+  # After each specialist, return to supervisor
+  graph.add_edge("researcher", "supervisor")
+  graph.add_edge("coder", "supervisor")
+  graph.add_edge("writer", "supervisor")
+
+  app = graph.compile()
+
+  def process_request(task: str) -> dict:
+      result = app.invoke({
+          "task": task,
+          "next_agent": "",
+          "agent_outputs": {},
+          "final_output": "",
+          "iteration": 0,
+      })
+      return {
+          "final_output": result.get("final_output", ""),
+          "agent_outputs": result.get("agent_outputs", {}),
+          "iteration": result.get("iteration", 0),
+      }
+
+constraints:
+  - "Must use LangGraph StateGraph"
+  - "Must have a supervisor that routes to specialists"
+  - "Must have at least 3 specialist agents"
+  - "Must have max iteration guard (5 iterations)"
+  - "After each specialist, control must return to supervisor"

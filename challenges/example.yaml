@@ -1,0 +1,96 @@
+id: "example-001-basic-llm-call"
+title: "Your First LLM Call with LangChain"
+description: |
+  Welcome to CodeGambit! In this introductory challenge, you will make your first
+  LLM call using LangChain's ChatOpenAI model and ChatPromptTemplate.
+
+  You need to:
+  1. Create a ChatPromptTemplate with a system message and a human message
+  2. Initialize a ChatOpenAI model
+  3. Chain the prompt and model together using LCEL pipe syntax
+  4. Invoke the chain with a topic variable to get a response
+
+  This challenge tests your understanding of LangChain's core abstractions:
+  prompts, models, and chains.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "beginner"
+elo_band: 800
+mode: "socratic"
+category: "calibration"
+tags: ["llm", "chat-model", "prompt-template", "lcel", "basics"]
+estimated_minutes: 10
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+
+  # TODO: Create a ChatPromptTemplate with:
+  #   - A system message: "You are a helpful assistant that explains {topic} simply."
+  #   - A human message: "Explain {topic} in 3 sentences."
+
+  # TODO: Initialize a ChatOpenAI model (use model="gpt-4o-mini")
+
+  # TODO: Chain the prompt and model using LCEL pipe syntax
+
+  # TODO: Invoke the chain with topic="quantum computing"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Uses ChatPromptTemplate.from_messages() correctly"
+      - "Properly structures system and human messages"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses LCEL pipe syntax (prompt | model) instead of legacy chains"
+      - "Correctly passes variables via invoke()"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Code is clean and follows LangChain 0.3.x conventions"
+      - "No deprecated API usage"
+
+socratic_questions:
+  - "What is the difference between ChatPromptTemplate and PromptTemplate, and when would you use each?"
+  - "How does the LCEL pipe syntax differ from calling prompt.format() and then model.invoke() separately?"
+  - "What type does the chain return, and how would you extract just the string content?"
+
+test_cases:
+  - name: "Test chain is properly constructed"
+    code: |
+      from langchain_core.runnables import RunnableSequence
+      assert isinstance(chain, RunnableSequence), "Chain should be a RunnableSequence built with pipe syntax"
+
+  - name: "Test chain produces output"
+    code: |
+      from langchain_core.messages import AIMessage
+      result = chain.invoke({"topic": "gravity"})
+      assert isinstance(result, AIMessage), "Chain output should be an AIMessage"
+      assert len(result.content) > 0, "Response content should not be empty"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+
+  # Create the prompt template with system and human messages
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful assistant that explains {topic} simply."),
+      ("human", "Explain {topic} in 3 sentences.")
+  ])
+
+  # Initialize the model
+  model = ChatOpenAI(model="gpt-4o-mini")
+
+  # Chain using LCEL pipe syntax
+  chain = prompt | model
+
+  # Invoke with a topic
+  result = chain.invoke({"topic": "quantum computing"})
+  print(result.content)
+
+constraints:
+  - "Must use LCEL pipe syntax (not legacy Chain classes)"
+  - "Must use ChatPromptTemplate, not PromptTemplate"
+  - "Must use ChatOpenAI from langchain_openai"

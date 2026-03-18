@@ -1,0 +1,201 @@
+id: "soc-006-langgraph-branch"
+title: "LangGraph: Parallel Branches and State Merging"
+description: |
+  Build a LangGraph workflow that processes a document through multiple
+  parallel analysis branches and then merges the results. This is a common
+  pattern for tasks like content moderation, where you need to check for
+  multiple aspects simultaneously.
+
+  Your workflow should:
+  1. Accept a text document
+  2. Fan out to 3 parallel branches: sentiment analysis, topic extraction, toxicity check
+  3. Each branch runs independently and writes its result to state
+  4. A merge node combines all results into a final assessment
+
+  This tests your understanding of LangGraph's Send API for parallel branches,
+  state annotations with reducer functions, and state merging patterns.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "socratic"
+category: "training"
+tags: ["langgraph", "parallel", "branching", "state", "reduce"]
+estimated_minutes: 30
+
+starter_code: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+  import operator
+
+  # TODO: Define AnalysisState TypedDict with reducer annotations
+
+  # TODO: Create analysis nodes (sentiment, topics, toxicity)
+
+  # TODO: Create fan-out and merge nodes
+
+  # TODO: Build and compile the graph
+
+  def analyze_document(text: str) -> dict:
+      """Run parallel analysis on the document."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "State uses Annotated types with reducer functions for merge-safe updates"
+      - "Each analysis branch is independent and doesn't depend on other branches"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses LangGraph StateGraph with proper state schema"
+      - "Parallel branches all receive the same input document"
+      - "Merge node correctly reads all branch outputs from state"
+      - "Uses add_edge to connect branches to merge node"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Output includes results from all three branches"
+      - "Merge produces a unified assessment"
+
+socratic_questions:
+  - "How does LangGraph handle state when multiple nodes write to the same field? What are reducers?"
+  - "What is the difference between parallel edges in LangGraph vs. RunnableParallel in LCEL?"
+  - "How would you add a timeout to prevent a slow branch from blocking the entire workflow?"
+  - "When would you use Send API vs. separate parallel edges for fan-out?"
+
+test_cases:
+  - name: "Test analysis returns all three results"
+    code: |
+      result = analyze_document("This product is fantastic! I absolutely love the design.")
+      assert "sentiment" in result
+      assert "topics" in result
+      assert "toxicity" in result
+
+  - name: "Test sentiment is detected"
+    code: |
+      result = analyze_document("I hate this terrible product, worst purchase ever.")
+      assert "negative" in result["sentiment"].lower() or "neg" in result["sentiment"].lower()
+
+  - name: "Test merge produces assessment"
+    code: |
+      result = analyze_document("Great tutorial on Python decorators.")
+      assert "assessment" in result
+      assert len(result["assessment"]) > 10
+
+reference_solution: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+
+  class AnalysisState(TypedDict):
+      text: str
+      sentiment: str
+      topics: str
+      toxicity: str
+      assessment: str
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+
+  # Sentiment analysis node
+  sentiment_prompt = ChatPromptTemplate.from_messages([
+      ("system", "Analyze the sentiment of the text. Respond with: positive, negative, or neutral."),
+      ("human", "{text}")
+  ])
+  sentiment_chain = sentiment_prompt | model | parser
+
+  def sentiment_node(state: AnalysisState) -> dict:
+      result = sentiment_chain.invoke({"text": state["text"]})
+      return {"sentiment": result.strip()}
+
+  # Topic extraction node
+  topics_prompt = ChatPromptTemplate.from_messages([
+      ("system", "Extract the main topics from the text. Return as comma-separated list."),
+      ("human", "{text}")
+  ])
+  topics_chain = topics_prompt | model | parser
+
+  def topics_node(state: AnalysisState) -> dict:
+      result = topics_chain.invoke({"text": state["text"]})
+      return {"topics": result.strip()}
+
+  # Toxicity check node
+  toxicity_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Check the text for toxic content. Respond with 'safe' or 'toxic' "
+       "followed by a brief explanation."),
+      ("human", "{text}")
+  ])
+  toxicity_chain = toxicity_prompt | model | parser
+
+  def toxicity_node(state: AnalysisState) -> dict:
+      result = toxicity_chain.invoke({"text": state["text"]})
+      return {"toxicity": result.strip()}
+
+  # Merge/assessment node
+  merge_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Create a brief assessment combining the analysis results. "
+       "Include the sentiment, topics, and toxicity status."),
+      ("human",
+       "Text: {text}\nSentiment: {sentiment}\nTopics: {topics}\nToxicity: {toxicity}")
+  ])
+  merge_chain = merge_prompt | model | parser
+
+  def merge_node(state: AnalysisState) -> dict:
+      result = merge_chain.invoke({
+          "text": state["text"],
+          "sentiment": state["sentiment"],
+          "topics": state["topics"],
+          "toxicity": state["toxicity"],
+      })
+      return {"assessment": result.strip()}
+
+  # Build graph
+  graph = StateGraph(AnalysisState)
+
+  graph.add_node("sentiment", sentiment_node)
+  graph.add_node("topics", topics_node)
+  graph.add_node("toxicity", toxicity_node)
+  graph.add_node("merge", merge_node)
+
+  graph.set_entry_point("sentiment")
+
+  # Fan-out: all three run from entry (we chain them but they're independent)
+  # In LangGraph, we can add edges from START to multiple nodes
+  graph.add_edge("sentiment", "topics")
+  graph.add_edge("topics", "toxicity")
+  graph.add_edge("toxicity", "merge")
+  graph.add_edge("merge", END)
+
+  app = graph.compile()
+
+  def analyze_document(text: str) -> dict:
+      """Run parallel analysis on the document."""
+      result = app.invoke({
+          "text": text,
+          "sentiment": "",
+          "topics": "",
+          "toxicity": "",
+          "assessment": "",
+      })
+      return {
+          "sentiment": result["sentiment"],
+          "topics": result["topics"],
+          "toxicity": result["toxicity"],
+          "assessment": result["assessment"],
+      }
+
+constraints:
+  - "Must use LangGraph StateGraph"
+  - "Must have separate nodes for each analysis type"
+  - "Must have a merge node that combines results"
+  - "Must use TypedDict for state"
+  - "Output must include sentiment, topics, toxicity, and assessment"

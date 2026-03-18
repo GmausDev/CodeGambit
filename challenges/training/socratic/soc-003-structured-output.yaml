@@ -1,0 +1,133 @@
+id: "soc-003-structured-output"
+title: "Structured Output with with_structured_output()"
+description: |
+  LangChain 0.3.x introduced `with_structured_output()` as the preferred way
+  to get structured data from LLMs — it's more reliable than PydanticOutputParser
+  because it uses function calling under the hood.
+
+  Build a job posting analyzer that extracts structured information from
+  unstructured job descriptions. Your system should parse out:
+  - Job title, company, location
+  - Required skills (list)
+  - Experience level (junior/mid/senior/lead)
+  - Salary range (if mentioned)
+  - Remote policy (remote/hybrid/onsite/unspecified)
+
+  This tests your understanding of `with_structured_output()`, Pydantic models,
+  and how to handle optional/missing fields gracefully.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "socratic"
+category: "training"
+tags: ["structured-output", "pydantic", "function-calling", "extraction"]
+estimated_minutes: 20
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from pydantic import BaseModel, Field
+  from typing import List, Optional
+
+  # TODO: Define the JobPosting Pydantic model
+
+  # TODO: Create the prompt
+
+  # TODO: Use model.with_structured_output(JobPosting)
+
+  # TODO: Build the LCEL chain
+
+  def analyze_job_posting(description: str) -> "JobPosting":
+      """Parse a job description into structured data."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Pydantic model has all required fields with correct types"
+      - "Optional fields (salary) use Optional type correctly"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Uses model.with_structured_output() instead of PydanticOutputParser"
+      - "Prompt guides the model on how to handle missing information"
+      - "Chain is composed with LCEL pipe syntax"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles job descriptions with missing salary gracefully"
+      - "Experience level uses a constrained set of values"
+
+socratic_questions:
+  - "How does with_structured_output() differ from PydanticOutputParser under the hood?"
+  - "Why is function calling more reliable for structured output than asking the LLM to output JSON?"
+  - "How would you handle cases where the LLM can't extract a required field?"
+  - "What happens if you add a new field to the Pydantic model — does the chain still work?"
+
+test_cases:
+  - name: "Test basic extraction"
+    code: |
+      posting = analyze_job_posting(
+          "We're hiring a Senior Python Developer at TechCorp in San Francisco. "
+          "Must know Python, FastAPI, and PostgreSQL. Salary: $150k-$180k. "
+          "Hybrid work policy."
+      )
+      assert posting.title is not None
+      assert len(posting.required_skills) >= 2
+      assert posting.experience_level in ["junior", "mid", "senior", "lead"]
+
+  - name: "Test handles missing salary"
+    code: |
+      posting = analyze_job_posting(
+          "Looking for a Junior React Developer. Remote position at StartupXYZ. "
+          "Skills: React, TypeScript, CSS."
+      )
+      assert posting.salary_range is None or posting.salary_range == ""
+      assert posting.remote_policy in ["remote", "hybrid", "onsite", "unspecified"]
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from pydantic import BaseModel, Field
+  from typing import List, Optional, Literal
+
+  class JobPosting(BaseModel):
+      title: str = Field(description="The job title")
+      company: str = Field(description="The company name")
+      location: str = Field(description="Job location or 'Remote'")
+      required_skills: List[str] = Field(description="List of required skills")
+      experience_level: Literal["junior", "mid", "senior", "lead"] = Field(
+          description="Experience level required"
+      )
+      salary_range: Optional[str] = Field(
+          default=None,
+          description="Salary range if mentioned, otherwise null"
+      )
+      remote_policy: Literal["remote", "hybrid", "onsite", "unspecified"] = Field(
+          description="Work location policy"
+      )
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a job posting analyzer. Extract structured information from "
+       "job descriptions. If salary is not mentioned, set salary_range to null. "
+       "If remote policy is unclear, use 'unspecified'."),
+      ("human", "Analyze this job posting:\n\n{description}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  structured_model = model.with_structured_output(JobPosting)
+
+  chain = prompt | structured_model
+
+  def analyze_job_posting(description: str) -> JobPosting:
+      """Parse a job description into structured data."""
+      return chain.invoke({"description": description})
+
+constraints:
+  - "Must use with_structured_output(), not PydanticOutputParser"
+  - "Must use Pydantic BaseModel with Field descriptions"
+  - "Must handle missing salary gracefully (Optional field)"
+  - "Must use Literal types for constrained fields"

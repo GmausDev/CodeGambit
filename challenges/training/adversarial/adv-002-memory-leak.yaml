@@ -1,0 +1,223 @@
+id: "adv-002-memory-leak"
+title: "Fix the Memory-Leaking Conversation Chain"
+description: |
+  A chatbot application has a serious memory leak. After running for a few hours,
+  it consumes gigabytes of RAM and eventually crashes. The developer used
+  LangChain's conversation history features but made critical mistakes that
+  cause unbounded memory growth.
+
+  The bugs involve:
+  - Unbounded message history (never trimmed)
+  - Creating new vector store instances on every message
+  - Global mutable state shared across sessions
+  - Missing cleanup of temporary embeddings
+
+  Find and fix all memory-related issues.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "adversarial"
+category: "training"
+tags: ["memory", "performance", "debugging", "production"]
+estimated_minutes: 25
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables.history import RunnableWithMessageHistory
+  from langchain_community.chat_message_histories import ChatMessageHistory
+  from langchain_community.vectorstores import FAISS
+  from langchain_core.documents import Document
+
+  # Bug 1: Global store that never gets cleaned up — entries accumulate forever
+  store = {}
+
+  def get_session_history(session_id: str) -> ChatMessageHistory:
+      if session_id not in store:
+          store[session_id] = ChatMessageHistory()
+      return store[session_id]
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful AI assistant."),
+      MessagesPlaceholder(variable_name="history"),
+      ("human", "{input}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini")
+  chain = prompt | model | StrOutputParser()
+
+  chain_with_history = RunnableWithMessageHistory(
+      chain,
+      get_session_history,
+      input_messages_key="input",
+      history_messages_key="history",
+  )
+
+  # Bug 2: Creating new embeddings and vector store on EVERY chat message
+  def chat_with_context(user_message: str, session_id: str, documents: list[str]) -> str:
+      # This creates a new FAISS index every single call — huge memory waste
+      embeddings = OpenAIEmbeddings()
+      docs = [Document(page_content=d) for d in documents]
+      vectorstore = FAISS.from_documents(docs, embeddings)  # Never freed
+      context = vectorstore.similarity_search(user_message, k=2)
+      context_str = "\n".join(doc.page_content for doc in context)
+
+      result = chain_with_history.invoke(
+          {"input": f"Context: {context_str}\n\nQuestion: {user_message}"},
+          config={"configurable": {"session_id": session_id}},
+      )
+      # Bug 3: vectorstore is never deleted, FAISS index stays in memory
+      return result
+
+  # Bug 4: No limit on history length — conversations grow unbounded
+  def get_full_history(session_id: str) -> list:
+      return get_session_history(session_id).messages
+
+bugs:
+  - id: "bug-1"
+    description: "Global session store grows forever — abandoned sessions are never cleaned up, leaking ChatMessageHistory objects"
+    severity: "major"
+  - id: "bug-2"
+    description: "New OpenAIEmbeddings and FAISS instances created on every chat call — should be cached or reused"
+    severity: "critical"
+  - id: "bug-3"
+    description: "FAISS vector store references are never cleaned up — each call leaks the index memory"
+    severity: "critical"
+  - id: "bug-4"
+    description: "Message history grows without bound — after thousands of messages, the prompt exceeds context limits and costs spiral"
+    severity: "major"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Vector store and embeddings are cached/reused, not recreated per call"
+      - "Session store has a cleanup mechanism (TTL, max size, or explicit cleanup)"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Message history is trimmed to a max length (e.g., last N messages)"
+      - "FAISS index is created once and reused, or properly cleaned up"
+      - "Embeddings instance is shared across calls"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Session cleanup prevents unbounded memory growth"
+      - "History trimming keeps token usage predictable"
+
+socratic_questions:
+  - "How would you implement a TTL (time-to-live) for conversation sessions?"
+  - "What is the memory footprint of a FAISS index and why does recreating it matter?"
+
+test_cases:
+  - name: "Test chat returns a response"
+    code: |
+      result = chat_with_context("Hello", "test-session", ["Some context document"])
+      assert isinstance(result, str)
+
+  - name: "Test history is bounded"
+    code: |
+      for i in range(50):
+          chat_with_context(f"Message {i}", "bounded-test", ["doc"])
+      history = get_full_history("bounded-test")
+      assert len(history) <= 40, f"History should be bounded, got {len(history)} messages"
+
+  - name: "Test vector store reuse"
+    code: |
+      import sys
+      docs = ["test doc " * 100] * 10
+      before = sys.getsizeof(store)
+      for i in range(10):
+          chat_with_context("test", "reuse-test", docs)
+      # Memory should not grow linearly with calls
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables.history import RunnableWithMessageHistory
+  from langchain_community.chat_message_histories import ChatMessageHistory
+  from langchain_community.vectorstores import FAISS
+  from langchain_core.documents import Document
+  from collections import OrderedDict
+
+  MAX_SESSIONS = 100
+  MAX_HISTORY_MESSAGES = 20
+
+  # Fix 1: Bounded session store with LRU eviction
+  class BoundedSessionStore:
+      def __init__(self, max_size: int = MAX_SESSIONS):
+          self._store: OrderedDict[str, ChatMessageHistory] = OrderedDict()
+          self._max_size = max_size
+
+      def get(self, session_id: str) -> ChatMessageHistory:
+          if session_id in self._store:
+              self._store.move_to_end(session_id)
+              return self._store[session_id]
+          if len(self._store) >= self._max_size:
+              self._store.popitem(last=False)  # Evict oldest
+          self._store[session_id] = ChatMessageHistory()
+          return self._store[session_id]
+
+      def cleanup(self, session_id: str) -> None:
+          self._store.pop(session_id, None)
+
+  session_store = BoundedSessionStore()
+
+  def get_session_history(session_id: str) -> ChatMessageHistory:
+      history = session_store.get(session_id)
+      # Fix 4: Trim history to prevent unbounded growth
+      if len(history.messages) > MAX_HISTORY_MESSAGES:
+          history.messages = history.messages[-MAX_HISTORY_MESSAGES:]
+      return history
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful AI assistant."),
+      MessagesPlaceholder(variable_name="history"),
+      ("human", "{input}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini")
+  chain = prompt | model | StrOutputParser()
+
+  chain_with_history = RunnableWithMessageHistory(
+      chain,
+      get_session_history,
+      input_messages_key="input",
+      history_messages_key="history",
+  )
+
+  # Fix 2 & 3: Cache embeddings and vector store
+  _embeddings = OpenAIEmbeddings()
+  _vectorstore_cache: dict[str, FAISS] = {}
+
+  def _get_or_create_vectorstore(documents: list[str], cache_key: str) -> FAISS:
+      if cache_key not in _vectorstore_cache:
+          docs = [Document(page_content=d) for d in documents]
+          _vectorstore_cache[cache_key] = FAISS.from_documents(docs, _embeddings)
+      return _vectorstore_cache[cache_key]
+
+  def chat_with_context(user_message: str, session_id: str, documents: list[str]) -> str:
+      # Use a stable cache key based on document content
+      cache_key = str(hash(tuple(documents)))
+      vectorstore = _get_or_create_vectorstore(documents, cache_key)
+      context = vectorstore.similarity_search(user_message, k=2)
+      context_str = "\n".join(doc.page_content for doc in context)
+
+      result = chain_with_history.invoke(
+          {"input": f"Context: {context_str}\n\nQuestion: {user_message}"},
+          config={"configurable": {"session_id": session_id}},
+      )
+      return result
+
+  def get_full_history(session_id: str) -> list:
+      return get_session_history(session_id).messages
+
+constraints:
+  - "Must fix all 4 memory issues"
+  - "Session store must have bounded size with eviction"
+  - "Message history must be trimmed to a maximum length"
+  - "Embeddings and vector store must be cached/reused"
+  - "No resource leaks on repeated calls"

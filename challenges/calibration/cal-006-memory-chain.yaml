@@ -1,0 +1,156 @@
+id: "cal-006-memory-chain"
+title: "Fix the Broken Conversation Memory"
+description: |
+  A developer tried to build a chatbot with conversation memory using LangChain,
+  but it's riddled with bugs. The chatbot should maintain conversation history
+  across multiple turns, but it currently either loses context or crashes.
+
+  The code uses several deprecated patterns and has logic errors in how message
+  history is managed. Your job is to find and fix all the bugs.
+
+  Key issues involve:
+  - Deprecated memory classes
+  - Incorrect message history integration
+  - Broken session management
+  - Wrong LCEL composition for history-aware chains
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "adversarial"
+category: "calibration"
+tags: ["memory", "conversation-history", "message-history", "debugging"]
+estimated_minutes: 25
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain.memory import ConversationBufferMemory
+  from langchain.chains import ConversationChain
+
+  # Bug 1: Using deprecated ConversationBufferMemory
+  memory = ConversationBufferMemory(return_messages=True)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful AI assistant. Be concise."),
+      MessagesPlaceholder(variable_name="history"),
+      ("human", "{input}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+
+  # Bug 2: Using deprecated ConversationChain instead of RunnableWithMessageHistory
+  chain = ConversationChain(llm=model, memory=memory, prompt=prompt)
+
+  # Bug 3: No session_id management — all conversations share one history
+  def chat(user_message: str) -> str:
+      result = chain.predict(input=user_message)
+      return result
+
+  # Bug 4: No way to get or manage history per session
+  def get_history() -> list:
+      return memory.load_memory_variables({})["history"]
+
+bugs:
+  - id: "bug-1"
+    description: "Uses deprecated ConversationBufferMemory from langchain.memory instead of ChatMessageHistory from langchain_community and RunnableWithMessageHistory from langchain_core"
+    severity: "critical"
+  - id: "bug-2"
+    description: "Uses deprecated ConversationChain instead of composing with RunnableWithMessageHistory wrapping an LCEL chain"
+    severity: "critical"
+  - id: "bug-3"
+    description: "No session_id parameter — all conversations share a single history instead of per-session isolation"
+    severity: "major"
+  - id: "bug-4"
+    description: "History retrieval is tied to deprecated memory API; needs to use the session-based ChatMessageHistory store"
+    severity: "major"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Uses a session-keyed store (dict of ChatMessageHistory) for per-conversation isolation"
+      - "Separates chain construction from history wrapping"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses RunnableWithMessageHistory instead of ConversationBufferMemory"
+      - "Correctly configures input_messages_key and history_messages_key"
+      - "Uses ChatMessageHistory from langchain_community.chat_message_histories"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Session management allows multiple independent conversations"
+      - "get_history() returns messages for a specific session_id"
+
+socratic_questions:
+  - "Why was ConversationBufferMemory deprecated in LangChain 0.3.x? What problems did it have?"
+  - "How does RunnableWithMessageHistory differ architecturally from the old memory classes?"
+
+test_cases:
+  - name: "Test chat returns a response"
+    code: |
+      response = chat("Hello, my name is Alice", session_id="test-1")
+      assert isinstance(response, str), "Must return a string"
+      assert len(response) > 0, "Response must not be empty"
+
+  - name: "Test conversation memory persists within session"
+    code: |
+      chat("My favorite color is blue", session_id="test-2")
+      response = chat("What is my favorite color?", session_id="test-2")
+      assert "blue" in response.lower(), "Bot should remember the favorite color"
+
+  - name: "Test sessions are isolated"
+    code: |
+      chat("I live in Tokyo", session_id="session-a")
+      response = chat("Where do I live?", session_id="session-b")
+      assert "tokyo" not in response.lower(), "Session B should not know about Session A"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables.history import RunnableWithMessageHistory
+  from langchain_community.chat_message_histories import ChatMessageHistory
+
+  # Session-based message history store
+  store: dict[str, ChatMessageHistory] = {}
+
+  def get_session_history(session_id: str) -> ChatMessageHistory:
+      if session_id not in store:
+          store[session_id] = ChatMessageHistory()
+      return store[session_id]
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful AI assistant. Be concise."),
+      MessagesPlaceholder(variable_name="history"),
+      ("human", "{input}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+
+  chain = prompt | model | StrOutputParser()
+
+  chain_with_history = RunnableWithMessageHistory(
+      chain,
+      get_session_history,
+      input_messages_key="input",
+      history_messages_key="history",
+  )
+
+  def chat(user_message: str, session_id: str = "default") -> str:
+      result = chain_with_history.invoke(
+          {"input": user_message},
+          config={"configurable": {"session_id": session_id}},
+      )
+      return result
+
+  def get_history(session_id: str = "default") -> list:
+      history = get_session_history(session_id)
+      return history.messages
+
+constraints:
+  - "Must use RunnableWithMessageHistory, not ConversationBufferMemory"
+  - "Must not use ConversationChain or any deprecated chain class"
+  - "Must support per-session message history via session_id"
+  - "Must use LCEL pipe syntax for the base chain"

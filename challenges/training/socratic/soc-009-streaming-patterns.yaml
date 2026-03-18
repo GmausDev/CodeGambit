@@ -1,0 +1,154 @@
+id: "soc-009-streaming-patterns"
+title: "Streaming Patterns in LCEL"
+description: |
+  Build a streaming-aware LCEL pipeline that demonstrates different streaming
+  patterns. In production, streaming is critical for UX — users should see
+  responses as they're generated, not wait for the full response.
+
+  You will implement:
+  1. Basic streaming with `.stream()` and `.astream()`
+  2. Streaming through a multi-step chain (understanding which steps can stream)
+  3. Using `astream_events` to get fine-grained streaming events from nested chains
+  4. Properly handling streaming with output parsers
+
+  This tests your understanding of how streaming propagates through LCEL chains
+  and which Runnables are "streamable."
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "socratic"
+category: "training"
+tags: ["streaming", "lcel", "async", "production", "events"]
+estimated_minutes: 28
+
+starter_code: |
+  import asyncio
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, streaming=True)
+  parser = StrOutputParser()
+
+  # TODO: Build a chain that supports streaming
+
+  # TODO: Implement sync streaming with .stream()
+
+  # TODO: Implement async streaming with .astream()
+
+  # TODO: Implement event streaming with .astream_events()
+
+  def stream_response(query: str):
+      """Generator that yields response chunks."""
+      pass
+
+  async def astream_response(query: str):
+      """Async generator that yields response chunks."""
+      pass
+
+  async def stream_events(query: str):
+      """Async generator that yields streaming events with metadata."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Chain is designed to support streaming end-to-end"
+      - "Streaming is enabled on the model (streaming=True)"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Uses .stream() for sync streaming that yields chunks"
+      - "Uses .astream() for async streaming"
+      - "Uses .astream_events(version='v2') for fine-grained events"
+      - "Understands that StrOutputParser passes through stream chunks"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles both sync and async streaming patterns"
+      - "Event stream filters for relevant event types"
+
+socratic_questions:
+  - "Which LCEL components can stream their output and which cannot? Why?"
+  - "What is the difference between .stream() and .astream_events()?"
+  - "How does streaming interact with output parsers — can you stream structured output?"
+  - "What happens when you stream through a RunnableParallel? Does each branch stream?"
+
+test_cases:
+  - name: "Test sync streaming yields chunks"
+    code: |
+      chunks = list(stream_response("Count from 1 to 5"))
+      assert len(chunks) > 1, "Should yield multiple chunks"
+      full_text = "".join(chunks)
+      assert len(full_text) > 5
+
+  - name: "Test async streaming yields chunks"
+    code: |
+      async def _test():
+          chunks = []
+          async for chunk in astream_response("Say hello world"):
+              chunks.append(chunk)
+          assert len(chunks) > 1
+      asyncio.run(_test())
+
+  - name: "Test event streaming includes events"
+    code: |
+      async def _test():
+          events = []
+          async for event in stream_events("Tell me a joke"):
+              events.append(event)
+          assert len(events) > 0
+          event_types = {e["event"] for e in events}
+          assert "on_chat_model_stream" in event_types or "on_chain_stream" in event_types
+      asyncio.run(_test())
+
+reference_solution: |
+  import asyncio
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, streaming=True)
+  parser = StrOutputParser()
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful assistant."),
+      ("human", "{query}")
+  ])
+
+  chain = prompt | model | parser
+
+  def stream_response(query: str):
+      """Generator that yields response chunks."""
+      for chunk in chain.stream({"query": query}):
+          yield chunk
+
+  async def astream_response(query: str):
+      """Async generator that yields response chunks."""
+      async for chunk in chain.astream({"query": query}):
+          yield chunk
+
+  async def stream_events(query: str):
+      """Async generator that yields streaming events with metadata."""
+      async for event in chain.astream_events(
+          {"query": query},
+          version="v2",
+      ):
+          # Filter for relevant events
+          if event["event"] in (
+              "on_chat_model_stream",
+              "on_chain_start",
+              "on_chain_end",
+          ):
+              yield event
+
+constraints:
+  - "Must enable streaming=True on the model"
+  - "Must implement both sync (.stream) and async (.astream) patterns"
+  - "Must use astream_events with version='v2'"
+  - "Must use LCEL pipe syntax"
+  - "Generators must yield individual chunks, not the full response"

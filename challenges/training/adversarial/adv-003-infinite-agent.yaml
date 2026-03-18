@@ -1,0 +1,170 @@
+id: "adv-003-infinite-agent"
+title: "Fix the Infinite-Looping Agent"
+description: |
+  A developer built a ReAct agent that's supposed to answer research questions
+  by searching the web and doing calculations. But the agent gets stuck in
+  infinite loops — it calls the same tools repeatedly with the same arguments
+  or alternates between two tools without making progress.
+
+  The bugs involve:
+  - Missing recursion limit on the agent
+  - Tool docstrings that confuse the agent about when to use each tool
+  - No stop condition for the research loop
+  - Tool output that doesn't give the agent enough info to stop
+
+  Fix all issues so the agent completes in bounded time.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "adversarial"
+category: "training"
+tags: ["agents", "debugging", "infinite-loop", "tools", "langgraph"]
+estimated_minutes: 25
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langgraph.prebuilt import create_react_agent
+
+  # Bug 1: Vague docstring — agent can't tell when to use this vs. calculate
+  @tool
+  def search(query: str) -> str:
+      """Search for information."""
+      return f"Results for {query}: some relevant information about the topic."
+
+  # Bug 2: Docstring overlaps with search — causes tool confusion
+  @tool
+  def calculate(expression: str) -> str:
+      """Process and compute information."""
+      try:
+          # Bug 3: Returns unhelpful output that prompts the agent to retry
+          result = eval(expression)
+          return f"Processing: {expression}"  # Doesn't include the actual result!
+      except Exception:
+          return "Could not process"  # No detail about what went wrong
+
+  # Bug 4: No recursion_limit — agent can loop forever
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  agent = create_react_agent(model, [search, calculate])
+
+  def ask(question: str) -> str:
+      result = agent.invoke({"messages": [("user", question)]})
+      return result["messages"][-1].content
+
+bugs:
+  - id: "bug-1"
+    description: "search tool docstring is too vague ('Search for information') — doesn't explain what it searches or when to use it vs. other tools"
+    severity: "major"
+  - id: "bug-2"
+    description: "calculate tool docstring ('Process and compute information') overlaps with search — agent can't distinguish between them"
+    severity: "major"
+  - id: "bug-3"
+    description: "calculate returns 'Processing: expression' instead of the actual computed result — agent sees no answer and retries the same tool"
+    severity: "critical"
+  - id: "bug-4"
+    description: "No recursion_limit on create_react_agent — if the agent gets confused, it loops indefinitely"
+    severity: "critical"
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Tool docstrings clearly differentiate each tool's purpose"
+      - "Agent has a bounded execution limit"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "create_react_agent uses recursion_limit parameter"
+      - "Tools return informative results that include the actual answer"
+      - "Tool docstrings specify input format and use cases"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Agent completes in bounded time for any input"
+      - "Error messages from tools are descriptive"
+
+socratic_questions:
+  - "Why do vague tool docstrings cause agents to loop? How does the agent decide which tool to use?"
+  - "How does recursion_limit work in LangGraph's create_react_agent?"
+
+test_cases:
+  - name: "Test agent answers without infinite loop"
+    code: |
+      import signal
+      def handler(signum, frame):
+          raise TimeoutError("Agent timed out")
+      signal.signal(signal.SIGALRM, handler)
+      signal.alarm(30)
+      result = ask("What is 42 * 17?")
+      signal.alarm(0)
+      assert "714" in result
+
+  - name: "Test agent uses search correctly"
+    code: |
+      signal.signal(signal.SIGALRM, handler)
+      signal.alarm(30)
+      result = ask("What is the capital of France?")
+      signal.alarm(0)
+      assert isinstance(result, str) and len(result) > 0
+
+  - name: "Test calculate returns actual results"
+    code: |
+      calc_result = calculate.invoke("2 + 3")
+      assert "5" in calc_result
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langgraph.prebuilt import create_react_agent
+  import ast
+  import operator
+
+  @tool
+  def search(query: str) -> str:
+      """Search the web for factual information about a topic.
+      Use this when you need to look up facts, current events, or general knowledge.
+      Input should be a natural language search query.
+      Do NOT use this for math calculations."""
+      return f"Search results for '{query}': The answer relates to {query}. Key information found."
+
+  @tool
+  def calculate(expression: str) -> str:
+      """Evaluate a mathematical expression and return the numeric result.
+      Use this ONLY for arithmetic calculations like '2 + 3' or '42 * 17'.
+      Input must be a valid math expression. Do NOT use this for text searches."""
+      ops = {
+          ast.Add: operator.add, ast.Sub: operator.sub,
+          ast.Mult: operator.mul, ast.Div: operator.truediv,
+          ast.Pow: operator.pow, ast.USub: operator.neg,
+      }
+      def _eval(node):
+          if isinstance(node, ast.Constant):
+              return node.value
+          elif isinstance(node, ast.BinOp):
+              return ops[type(node.op)](_eval(node.left), _eval(node.right))
+          elif isinstance(node, ast.UnaryOp):
+              return ops[type(node.op)](_eval(node.operand))
+          else:
+              raise ValueError(f"Unsupported: {ast.dump(node)}")
+      try:
+          tree = ast.parse(expression, mode="eval")
+          result = _eval(tree.body)
+          return f"The result of {expression} is {result}"
+      except Exception as e:
+          return f"Error evaluating '{expression}': {str(e)}. Please provide a valid math expression."
+
+  # Fix 4: Add recursion_limit to prevent infinite loops
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  agent = create_react_agent(model, [search, calculate], recursion_limit=15)
+
+  def ask(question: str) -> str:
+      result = agent.invoke({"messages": [("user", question)]})
+      return result["messages"][-1].content
+
+constraints:
+  - "Must fix all 4 bugs"
+  - "Agent must complete within 30 seconds for any query"
+  - "Must use create_react_agent with recursion_limit"
+  - "Tool docstrings must clearly differentiate tool purposes"
+  - "Tools must return the actual result, not just acknowledgment"

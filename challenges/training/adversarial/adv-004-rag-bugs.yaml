@@ -1,0 +1,223 @@
+id: "adv-004-rag-bugs"
+title: "Fix the Hallucinating RAG Pipeline"
+description: |
+  A RAG pipeline is producing hallucinated answers — it confidently responds
+  with information that isn't in the retrieved documents. The pipeline also
+  sometimes returns irrelevant documents and fails to answer questions that
+  clearly should be answerable from the document collection.
+
+  The bugs span the entire RAG stack:
+  - Text splitting creates chunks that break mid-sentence
+  - Embedding search uses wrong similarity metric
+  - Retrieved context is formatted poorly, losing document boundaries
+  - The prompt doesn't instruct the model to stay grounded in context
+
+  This is a realistic debugging scenario — RAG quality issues are often
+  caused by multiple small bugs compounding together.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "adversarial"
+category: "training"
+tags: ["rag", "debugging", "hallucination", "retrieval", "production"]
+estimated_minutes: 30
+
+buggy_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import CharacterTextSplitter
+  from langchain_core.documents import Document
+
+  documents = [
+      Document(page_content=(
+          "LangChain 0.3 introduced LCEL as the primary way to compose chains. "
+          "LCEL uses the pipe operator (|) to connect runnables. Each runnable "
+          "transforms its input and passes the output to the next. This replaced "
+          "the older Chain classes like LLMChain and SequentialChain."
+      )),
+      Document(page_content=(
+          "RunnableWithMessageHistory is the replacement for ConversationBufferMemory. "
+          "It wraps any runnable and automatically manages message history. "
+          "You must provide a function that returns a ChatMessageHistory for each "
+          "session_id."
+      )),
+      Document(page_content=(
+          "create_react_agent from langgraph.prebuilt replaces the deprecated "
+          "AgentExecutor. It creates a LangGraph that implements the ReAct pattern. "
+          "Tools must be defined with the @tool decorator and have clear docstrings."
+      )),
+  ]
+
+  # Bug 1: CharacterTextSplitter with tiny chunk_size breaks sentences mid-word
+  splitter = CharacterTextSplitter(chunk_size=30, chunk_overlap=0, separator="")
+
+  splits = splitter.split_documents(documents)
+
+  embeddings = OpenAIEmbeddings()
+  vectorstore = FAISS.from_documents(splits, embeddings)
+
+  # Bug 2: k=1 retrieves too few documents, missing relevant context
+  retriever = vectorstore.as_retriever(search_kwargs={"k": 1})
+
+  # Bug 3: format_docs loses document boundaries — just concatenates everything
+  def format_docs(docs):
+      return "".join(doc.page_content for doc in docs)
+
+  # Bug 4: System prompt doesn't ground the model — no instruction to only use context
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful assistant."),
+      ("human", "Context: {context}\n\nQuestion: {question}")
+  ])
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.8)  # Bug 5: too high temp
+
+  chain = (
+      {"context": retriever | format_docs, "question": RunnablePassthrough()}
+      | prompt
+      | model
+      | StrOutputParser()
+  )
+
+  def ask(question: str) -> str:
+      return chain.invoke(question)
+
+bugs:
+  - id: "bug-1"
+    description: "CharacterTextSplitter with chunk_size=30 and separator='' splits mid-word, creating meaningless chunks that embed poorly"
+    severity: "critical"
+  - id: "bug-2"
+    description: "Retriever k=1 fetches only one document — insufficient context for questions that span multiple documents"
+    severity: "major"
+  - id: "bug-3"
+    description: "format_docs concatenates without separators, merging document contents into an unreadable blob"
+    severity: "major"
+  - id: "bug-4"
+    description: "System prompt lacks grounding instruction — model freely hallucinated beyond retrieved context"
+    severity: "critical"
+  - id: "bug-5"
+    description: "Temperature 0.8 encourages creative generation instead of factual grounded answers"
+    severity: "major"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Text splitter produces coherent, sentence-respecting chunks"
+      - "Prompt explicitly grounds the model in retrieved context"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses RecursiveCharacterTextSplitter with appropriate chunk_size (200+)"
+      - "Retriever k >= 3 for sufficient context coverage"
+      - "format_docs separates documents with clear boundaries"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Temperature is low (0-0.2) for factual RAG responses"
+      - "System prompt instructs model to say 'I don't know' when context is insufficient"
+
+socratic_questions:
+  - "Why does chunk size matter for RAG quality? What happens with chunks that are too small or too large?"
+  - "How does the grounding instruction in the system prompt reduce hallucination?"
+
+test_cases:
+  - name: "Test grounded answer"
+    code: |
+      result = ask("What replaced ConversationBufferMemory?")
+      assert "runnablewithmessagehistory" in result.lower().replace(" ", "")
+
+  - name: "Test refuses unknown questions"
+    code: |
+      result = ask("What is the capital of Mars?")
+      result_lower = result.lower()
+      assert "don't know" in result_lower or "not" in result_lower or "no information" in result_lower
+
+  - name: "Test chunks are coherent"
+    code: |
+      for split in splits:
+          words = split.page_content.split()
+          assert len(words) >= 3, f"Chunk too small: '{split.page_content}'"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langchain_core.documents import Document
+
+  documents = [
+      Document(page_content=(
+          "LangChain 0.3 introduced LCEL as the primary way to compose chains. "
+          "LCEL uses the pipe operator (|) to connect runnables. Each runnable "
+          "transforms its input and passes the output to the next. This replaced "
+          "the older Chain classes like LLMChain and SequentialChain."
+      )),
+      Document(page_content=(
+          "RunnableWithMessageHistory is the replacement for ConversationBufferMemory. "
+          "It wraps any runnable and automatically manages message history. "
+          "You must provide a function that returns a ChatMessageHistory for each "
+          "session_id."
+      )),
+      Document(page_content=(
+          "create_react_agent from langgraph.prebuilt replaces the deprecated "
+          "AgentExecutor. It creates a LangGraph that implements the ReAct pattern. "
+          "Tools must be defined with the @tool decorator and have clear docstrings."
+      )),
+  ]
+
+  # Fix 1: Use RecursiveCharacterTextSplitter with reasonable chunk_size
+  splitter = RecursiveCharacterTextSplitter(
+      chunk_size=250,
+      chunk_overlap=50,
+      separators=["\n\n", "\n", ". ", " ", ""],
+  )
+  splits = splitter.split_documents(documents)
+
+  embeddings = OpenAIEmbeddings()
+  vectorstore = FAISS.from_documents(splits, embeddings)
+
+  # Fix 2: Retrieve more documents for better context
+  retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+  # Fix 3: Add clear document boundaries
+  def format_docs(docs):
+      return "\n\n---\n\n".join(
+          f"Document {i+1}:\n{doc.page_content}"
+          for i, doc in enumerate(docs)
+      )
+
+  # Fix 4: Grounding instruction in system prompt
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are a helpful assistant. Answer the question based ONLY on the "
+       "provided context. If the context does not contain enough information "
+       "to answer the question, say 'I don't have enough information to answer "
+       "that question.' Do not make up information."),
+      ("human", "Context:\n{context}\n\nQuestion: {question}")
+  ])
+
+  # Fix 5: Low temperature for factual answers
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  chain = (
+      {"context": retriever | format_docs, "question": RunnablePassthrough()}
+      | prompt
+      | model
+      | StrOutputParser()
+  )
+
+  def ask(question: str) -> str:
+      return chain.invoke(question)
+
+constraints:
+  - "Must fix all 5 bugs"
+  - "Must use RecursiveCharacterTextSplitter with chunk_size >= 200"
+  - "Must retrieve at least 3 documents"
+  - "System prompt must include grounding instruction"
+  - "Temperature must be 0.2 or lower"

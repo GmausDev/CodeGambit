@@ -1,0 +1,266 @@
+id: "adv-005-langgraph-corruption"
+title: "Fix the State-Corrupting LangGraph Workflow"
+description: |
+  A LangGraph workflow for processing customer orders has several state
+  management bugs that cause data corruption. Orders get mixed up, state
+  is mutated instead of returned, and the conditional routing logic has
+  edge cases that cause the workflow to enter invalid states.
+
+  The bugs are subtle and represent common mistakes developers make when
+  building LangGraph applications:
+  - Mutating state instead of returning new state dicts
+  - Missing state initialization causing KeyError
+  - Conditional edge function returning invalid node names
+  - Reducer annotations missing on list fields causing overwrites
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "master"
+elo_band: 1600
+mode: "adversarial"
+category: "training"
+tags: ["langgraph", "state", "debugging", "workflow", "production"]
+estimated_minutes: 35
+
+buggy_code: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+  import operator
+
+  # Bug 1: errors field is a list but has no reducer — parallel updates overwrite
+  class OrderState(TypedDict):
+      order_id: str
+      items: list[str]
+      total: float
+      status: str
+      errors: list[str]  # Should use Annotated[list[str], operator.add]
+      validation_passed: bool
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  def validate_order(state: OrderState) -> dict:
+      errors = []
+      # Bug 2: Mutating state directly instead of returning new values
+      if not state["items"]:
+          state["errors"].append("No items in order")  # MUTATION!
+          state["validation_passed"] = False
+      elif state["total"] <= 0:
+          state["errors"].append("Invalid total")  # MUTATION!
+          state["validation_passed"] = False
+      else:
+          state["validation_passed"] = True
+      return state  # Bug: returning entire mutated state instead of just changes
+
+  def process_payment(state: OrderState) -> dict:
+      # Bug 3: No check for required fields — crashes if total is missing
+      amount = state["total"]
+      return {"status": "payment_processed"}
+
+  def ship_order(state: OrderState) -> dict:
+      return {"status": "shipped"}
+
+  def reject_order(state: OrderState) -> dict:
+      return {"status": "rejected"}
+
+  # Bug 4: Router returns node name that doesn't exist for edge case
+  def route_after_validation(state: OrderState) -> str:
+      if state["validation_passed"]:
+          return "process_payment"
+      elif len(state["errors"]) > 3:
+          return "escalate"  # Node doesn't exist!
+      else:
+          return "reject_order"
+
+  graph = StateGraph(OrderState)
+  graph.add_node("validate", validate_order)
+  graph.add_node("process_payment", process_payment)
+  graph.add_node("ship", ship_order)
+  graph.add_node("reject", reject_order)
+
+  graph.set_entry_point("validate")
+
+  graph.add_conditional_edges(
+      "validate",
+      route_after_validation,
+      {
+          "process_payment": "process_payment",
+          "reject_order": "reject",
+          # "escalate" mapping is missing!
+      }
+  )
+
+  graph.add_edge("process_payment", "ship")
+  graph.add_edge("ship", END)
+  graph.add_edge("reject", END)
+
+  app = graph.compile()
+
+  def process_order(order_id: str, items: list[str], total: float) -> dict:
+      result = app.invoke({
+          "order_id": order_id,
+          "items": items,
+          "total": total,
+          # Bug 5: Missing initialization for status, errors, validation_passed
+      })
+      return result
+
+bugs:
+  - id: "bug-1"
+    description: "errors list field has no reducer annotation — concurrent state updates will overwrite instead of append"
+    severity: "major"
+  - id: "bug-2"
+    description: "validate_order mutates state directly (state['errors'].append()) instead of returning a new dict — causes state corruption in LangGraph"
+    severity: "critical"
+  - id: "bug-3"
+    description: "process_payment accesses state['total'] without checking if validation passed — could process invalid orders"
+    severity: "major"
+  - id: "bug-4"
+    description: "Router returns 'escalate' which has no corresponding node or mapping — causes KeyError at runtime"
+    severity: "critical"
+  - id: "bug-5"
+    description: "Missing initialization for status, errors, and validation_passed in invoke() — causes KeyError when nodes access these fields"
+    severity: "critical"
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "State has reducer annotations on list fields"
+      - "All conditional edge paths map to existing nodes"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Nodes return dicts with only changed fields (no state mutation)"
+      - "All state fields are initialized in the invoke call"
+      - "Router function handles all possible states including edge cases"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Escalation path exists or is properly handled"
+      - "Process payment validates preconditions"
+
+socratic_questions:
+  - "Why does LangGraph require nodes to return new dicts instead of mutating state?"
+  - "What are reducer functions in LangGraph and when do you need them?"
+
+test_cases:
+  - name: "Test valid order processing"
+    code: |
+      result = process_order("ORD-001", ["widget", "gadget"], 29.99)
+      assert result["status"] == "shipped"
+      assert result["validation_passed"] is True
+
+  - name: "Test invalid order rejection"
+    code: |
+      result = process_order("ORD-002", [], 0)
+      assert result["status"] == "rejected"
+      assert len(result["errors"]) > 0
+
+  - name: "Test no state corruption between orders"
+    code: |
+      result1 = process_order("ORD-003", ["item1"], 10.0)
+      result2 = process_order("ORD-004", [], 0)
+      assert result1["order_id"] != result2["order_id"]
+      assert result1["status"] != result2["status"]
+
+reference_solution: |
+  from typing import TypedDict, Annotated
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langgraph.graph import StateGraph, END
+  import operator
+
+  # Fix 1: Add reducer annotation to errors list
+  class OrderState(TypedDict):
+      order_id: str
+      items: list[str]
+      total: float
+      status: str
+      errors: Annotated[list[str], operator.add]  # Reducer for list merging
+      validation_passed: bool
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  # Fix 2: Return new dict, don't mutate state
+  def validate_order(state: OrderState) -> dict:
+      errors = []
+      passed = True
+      if not state.get("items"):
+          errors.append("No items in order")
+          passed = False
+      if state.get("total", 0) <= 0:
+          errors.append("Invalid total")
+          passed = False
+      return {"errors": errors, "validation_passed": passed}
+
+  # Fix 3: Validate preconditions
+  def process_payment(state: OrderState) -> dict:
+      if not state.get("validation_passed"):
+          return {"status": "payment_failed", "errors": ["Payment attempted on invalid order"]}
+      return {"status": "payment_processed"}
+
+  def ship_order(state: OrderState) -> dict:
+      return {"status": "shipped"}
+
+  def reject_order(state: OrderState) -> dict:
+      return {"status": "rejected"}
+
+  def escalate_order(state: OrderState) -> dict:
+      return {"status": "escalated"}
+
+  # Fix 4: Handle all router paths, including escalate
+  def route_after_validation(state: OrderState) -> str:
+      if state.get("validation_passed"):
+          return "process_payment"
+      elif len(state.get("errors", [])) > 3:
+          return "escalate"
+      else:
+          return "reject_order"
+
+  graph = StateGraph(OrderState)
+  graph.add_node("validate", validate_order)
+  graph.add_node("process_payment", process_payment)
+  graph.add_node("ship", ship_order)
+  graph.add_node("reject", reject_order)
+  graph.add_node("escalate", escalate_order)  # Add the missing node
+
+  graph.set_entry_point("validate")
+
+  graph.add_conditional_edges(
+      "validate",
+      route_after_validation,
+      {
+          "process_payment": "process_payment",
+          "reject_order": "reject",
+          "escalate": "escalate",  # Add the missing mapping
+      }
+  )
+
+  graph.add_edge("process_payment", "ship")
+  graph.add_edge("ship", END)
+  graph.add_edge("reject", END)
+  graph.add_edge("escalate", END)
+
+  app = graph.compile()
+
+  # Fix 5: Initialize all state fields
+  def process_order(order_id: str, items: list[str], total: float) -> dict:
+      result = app.invoke({
+          "order_id": order_id,
+          "items": items,
+          "total": total,
+          "status": "pending",
+          "errors": [],
+          "validation_passed": False,
+      })
+      return result
+
+constraints:
+  - "Must fix all 5 bugs"
+  - "Nodes must return new dicts, never mutate state"
+  - "All conditional edge paths must map to existing nodes"
+  - "All state fields must be initialized"
+  - "List fields that can be updated from multiple nodes need reducer annotations"

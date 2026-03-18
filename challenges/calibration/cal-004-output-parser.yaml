@@ -1,0 +1,128 @@
+id: "cal-004-output-parser"
+title: "Structured Output with Pydantic Parsing"
+description: |
+  LangChain's output parsers let you extract structured data from LLM responses.
+  In this challenge, you will build a chain that analyzes a code snippet and
+  returns structured feedback as a Pydantic model.
+
+  You need to:
+  1. Define a Pydantic model `CodeReview` with fields for `quality_score` (int 1-10),
+     `issues` (list of strings), `suggestions` (list of strings), and `language` (str).
+  2. Create a ChatPromptTemplate that instructs the LLM to review code.
+  3. Use `PydanticOutputParser` to parse the response into your model.
+  4. Include the parser's format instructions in the prompt.
+
+  This tests your understanding of output parsing, prompt engineering with
+  format instructions, and Pydantic integration.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "intermediate"
+elo_band: 1000
+mode: "socratic"
+category: "calibration"
+tags: ["output-parser", "pydantic", "structured-output", "lcel"]
+estimated_minutes: 18
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import PydanticOutputParser
+  from pydantic import BaseModel, Field
+  from typing import List
+
+  # TODO: Define the CodeReview Pydantic model
+  # Fields: quality_score (int, 1-10), issues (List[str]),
+  #         suggestions (List[str]), language (str)
+
+  # TODO: Create the PydanticOutputParser with your model
+
+  # TODO: Create a ChatPromptTemplate that includes {format_instructions}
+  #       and {code_snippet} variables
+
+  # TODO: Build the LCEL chain: prompt | model | parser
+
+  def review_code(code_snippet: str) -> "CodeReview":
+      """Analyze code and return structured review."""
+      # TODO: invoke the chain
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Pydantic model has all required fields with correct types and validation"
+      - "Uses Field() with descriptions for each Pydantic field"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Correctly creates PydanticOutputParser with the model class"
+      - "Includes parser.get_format_instructions() in the prompt via partial_variables or direct injection"
+      - "LCEL chain is prompt | model | parser"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "quality_score has proper validation (ge=1, le=10)"
+      - "Chain returns a properly typed CodeReview instance"
+
+socratic_questions:
+  - "What are the advantages of using PydanticOutputParser over manually parsing JSON from the LLM response?"
+  - "How do format_instructions work — what does the parser actually inject into the prompt?"
+  - "What happens when the LLM returns malformed output? How would you add retry logic?"
+  - "How does the newer `with_structured_output()` method compare to PydanticOutputParser?"
+
+test_cases:
+  - name: "Test CodeReview model has correct fields"
+    code: |
+      review = CodeReview(quality_score=7, issues=["unused var"], suggestions=["add types"], language="python")
+      assert review.quality_score == 7
+      assert review.language == "python"
+      assert len(review.issues) == 1
+
+  - name: "Test review_code returns CodeReview instance"
+    code: |
+      result = review_code("def add(a, b): return a + b")
+      assert isinstance(result, CodeReview), "Must return a CodeReview instance"
+      assert 1 <= result.quality_score <= 10, "Score must be 1-10"
+      assert isinstance(result.issues, list), "Issues must be a list"
+
+  - name: "Test quality_score validation"
+    code: |
+      import pytest
+      with pytest.raises(Exception):
+          CodeReview(quality_score=15, issues=[], suggestions=[], language="python")
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import PydanticOutputParser
+  from pydantic import BaseModel, Field
+  from typing import List
+
+  class CodeReview(BaseModel):
+      quality_score: int = Field(ge=1, le=10, description="Code quality score from 1-10")
+      issues: List[str] = Field(description="List of identified issues in the code")
+      suggestions: List[str] = Field(description="List of improvement suggestions")
+      language: str = Field(description="Programming language of the snippet")
+
+  parser = PydanticOutputParser(pydantic_object=CodeReview)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "You are an expert code reviewer. Analyze the given code snippet and "
+       "provide structured feedback.\n\n{format_instructions}"),
+      ("human", "Review this code:\n\n```\n{code_snippet}\n```")
+  ]).partial(format_instructions=parser.get_format_instructions())
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+  chain = prompt | model | parser
+
+  def review_code(code_snippet: str) -> CodeReview:
+      """Analyze code and return structured review."""
+      return chain.invoke({"code_snippet": code_snippet})
+
+constraints:
+  - "Must define a Pydantic BaseModel with proper field validation"
+  - "Must use PydanticOutputParser from langchain_core"
+  - "Must include format_instructions in the prompt"
+  - "Must use LCEL pipe syntax"

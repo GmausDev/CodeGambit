@@ -1,0 +1,216 @@
+id: "col-002-doc-qa-system"
+title: "Build a Document Q&A System with Citations"
+description: |
+  Build a complete document Q&A system that not only answers questions from
+  uploaded documents but also provides source citations for every claim.
+  This is a common real-world application of RAG.
+
+  Your system should:
+  1. Ingest documents from different formats (text content)
+  2. Split, embed, and index them in a vector store
+  3. For each question, retrieve relevant chunks
+  4. Generate an answer with inline citations [Source: doc_name, chunk_id]
+  5. Return the answer along with the source documents used
+
+  Build this incrementally, testing each component.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "collaborative"
+category: "training"
+tags: ["rag", "qa", "citations", "document-processing"]
+estimated_minutes: 35
+
+steps:
+  - id: "step-1"
+    title: "Document Ingestion and Splitting"
+    description: |
+      Create a function that takes a list of documents (with name and content),
+      splits them using RecursiveCharacterTextSplitter, and preserves metadata
+      (source name, chunk index) on each split.
+  - id: "step-2"
+    title: "Vector Store Indexing"
+    description: |
+      Create a FAISS vector store from the split documents. Build a function
+      that can add new documents to an existing index incrementally.
+  - id: "step-3"
+    title: "Citation-Aware Retrieval Chain"
+    description: |
+      Build an LCEL chain that retrieves relevant chunks and formats them with
+      source metadata visible to the LLM. The prompt should instruct the model
+      to cite sources using [Source: name] format.
+  - id: "step-4"
+    title: "Answer with Source Tracking"
+    description: |
+      Build the final answer function that returns both the answer text and
+      a list of source documents that were used, including their metadata.
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langchain_core.documents import Document
+
+  # TODO: Implement step by step
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clean separation between ingestion, indexing, retrieval, and generation"
+      - "Metadata is preserved through the entire pipeline"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Proper text splitting with metadata preservation"
+      - "Vector store supports incremental document addition"
+      - "RAG chain uses LCEL with proper context formatting"
+      - "Prompt explicitly instructs citation behavior"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Source documents are returned alongside the answer"
+      - "Citation format is consistent and parseable"
+
+socratic_questions:
+  - "How do you ensure citation accuracy — that the model only cites sources it actually used?"
+  - "What happens when multiple chunks from the same document are retrieved?"
+  - "How would you handle document updates — re-indexing a document that changed?"
+
+test_cases:
+  - name: "Test document ingestion"
+    code: |
+      docs = ingest_documents([
+          {"name": "guide.txt", "content": "LangChain is a framework for LLM apps."},
+          {"name": "faq.txt", "content": "Install with pip install langchain."},
+      ])
+      assert len(docs) >= 2
+      assert all(doc.metadata.get("source") for doc in docs)
+
+  - name: "Test answer includes citations"
+    code: |
+      result = ask("How do I install LangChain?")
+      assert "[Source:" in result["answer"] or "source" in result["answer"].lower()
+
+  - name: "Test source documents returned"
+    code: |
+      result = ask("What is LangChain?")
+      assert "sources" in result
+      assert len(result["sources"]) > 0
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langchain_core.documents import Document
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+  embeddings = OpenAIEmbeddings()
+  splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
+
+  vectorstore = None
+
+  # Step 1: Document ingestion
+  def ingest_documents(doc_list: list[dict]) -> list[Document]:
+      documents = []
+      for doc in doc_list:
+          raw_doc = Document(
+              page_content=doc["content"],
+              metadata={"source": doc["name"]}
+          )
+          splits = splitter.split_documents([raw_doc])
+          for i, split in enumerate(splits):
+              split.metadata["chunk_index"] = i
+          documents.extend(splits)
+      return documents
+
+  # Step 2: Indexing
+  def index_documents(documents: list[Document]):
+      global vectorstore
+      if vectorstore is None:
+          vectorstore = FAISS.from_documents(documents, embeddings)
+      else:
+          vectorstore.add_documents(documents)
+
+  def get_retriever(k: int = 4):
+      return vectorstore.as_retriever(search_kwargs={"k": k})
+
+  # Step 3: Citation-aware formatting
+  def format_docs_with_citations(docs: list[Document]) -> str:
+      formatted = []
+      for doc in docs:
+          source = doc.metadata.get("source", "unknown")
+          chunk = doc.metadata.get("chunk_index", 0)
+          formatted.append(
+              f"[Source: {source}, Chunk {chunk}]\n{doc.page_content}"
+          )
+      return "\n\n".join(formatted)
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Answer the question based on the provided context. "
+       "For every claim you make, include a citation in the format "
+       "[Source: filename] referring to the document that supports it. "
+       "If the context doesn't contain the answer, say so."),
+      ("human", "Context:\n{context}\n\nQuestion: {question}")
+  ])
+
+  # Step 4: Full pipeline with source tracking
+  _last_retrieved_docs = []
+
+  def _capture_and_format(docs):
+      global _last_retrieved_docs
+      _last_retrieved_docs = docs
+      return format_docs_with_citations(docs)
+
+  def build_qa_chain():
+      retriever = get_retriever()
+      chain = (
+          {
+              "context": retriever | RunnableLambda(_capture_and_format),
+              "question": RunnablePassthrough()
+          }
+          | prompt
+          | model
+          | parser
+      )
+      return chain
+
+  def ask(question: str) -> dict:
+      global _last_retrieved_docs
+      _last_retrieved_docs = []
+      chain = build_qa_chain()
+      answer = chain.invoke(question)
+      return {
+          "answer": answer,
+          "sources": [
+              {
+                  "source": doc.metadata.get("source"),
+                  "chunk_index": doc.metadata.get("chunk_index"),
+                  "content": doc.page_content,
+              }
+              for doc in _last_retrieved_docs
+          ],
+      }
+
+  # Initialize with sample data
+  sample_docs = ingest_documents([
+      {"name": "guide.txt", "content": "LangChain is a framework for building LLM applications. It provides tools for chains, agents, and retrieval."},
+      {"name": "faq.txt", "content": "Install LangChain with pip install langchain. Python 3.9+ is required."},
+  ])
+  index_documents(sample_docs)
+
+constraints:
+  - "Must preserve document metadata through splitting and indexing"
+  - "Must include source citations in the answer"
+  - "Must return source documents alongside the answer"
+  - "Must use LCEL pipe syntax"
+  - "Must support incremental document addition"

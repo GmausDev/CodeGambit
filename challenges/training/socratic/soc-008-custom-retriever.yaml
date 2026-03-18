@@ -1,0 +1,168 @@
+id: "soc-008-custom-retriever"
+title: "Build a Custom Retriever with Reranking"
+description: |
+  Build a custom retriever that extends LangChain's BaseRetriever and implements
+  a two-stage retrieval pipeline: first retrieve candidates with vector search,
+  then rerank them using a cross-encoder style LLM-based reranker.
+
+  Your custom retriever should:
+  1. Extend BaseRetriever with the _get_relevant_documents method
+  2. First stage: retrieve top-k candidates from a FAISS vector store
+  3. Second stage: use an LLM to score each candidate's relevance (0-10)
+  4. Return documents sorted by reranking score, with scores in metadata
+
+  This tests your understanding of the retriever abstraction, how to extend
+  it, and the common pattern of retrieve-then-rerank.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "socratic"
+category: "training"
+tags: ["retriever", "custom", "reranking", "rag", "advanced"]
+estimated_minutes: 30
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.retrievers import BaseRetriever
+  from langchain_core.documents import Document
+  from langchain_core.callbacks import CallbackManagerForRetrieverRun
+  from langchain_community.vectorstores import FAISS
+  from pydantic import Field
+  from typing import List
+
+  # TODO: Create the RerankedRetriever class extending BaseRetriever
+  #   - _get_relevant_documents(self, query, *, run_manager) -> List[Document]
+  #   - First stage: vector search for top_k candidates
+  #   - Second stage: LLM-based reranking
+
+  def build_reranked_retriever(documents: list[Document]) -> "RerankedRetriever":
+      """Build and return a reranked retriever from documents."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Cleanly extends BaseRetriever with proper method signature"
+      - "Two-stage pipeline is explicit: retrieve candidates, then rerank"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Implements _get_relevant_documents with correct signature"
+      - "Uses FAISS retriever for candidate generation"
+      - "LLM reranker scores each document-query pair"
+      - "Reranking scores are stored in document metadata"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles edge cases (no results, identical scores)"
+      - "Top-k parameter controls candidate pool size"
+
+socratic_questions:
+  - "Why use a two-stage retrieve-then-rerank approach instead of just using a better embedding model?"
+  - "What is _get_relevant_documents vs _aget_relevant_documents? When would you implement the async version?"
+  - "How does extending BaseRetriever make your custom retriever composable with LCEL chains?"
+  - "What are the latency implications of LLM-based reranking?"
+
+test_cases:
+  - name: "Test retriever returns documents"
+    code: |
+      docs = [
+          Document(page_content="Python is a programming language"),
+          Document(page_content="JavaScript runs in the browser"),
+          Document(page_content="Python has great data science libraries"),
+      ]
+      retriever = build_reranked_retriever(docs)
+      results = retriever.invoke("Python data science")
+      assert len(results) > 0
+
+  - name: "Test reranking improves relevance order"
+    code: |
+      docs = [
+          Document(page_content="Python is a programming language"),
+          Document(page_content="JavaScript runs in the browser"),
+          Document(page_content="Python has great data science libraries like pandas and numpy"),
+      ]
+      retriever = build_reranked_retriever(docs)
+      results = retriever.invoke("Python data science tools")
+      # The most relevant doc should mention data science
+      assert "data science" in results[0].page_content.lower()
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.retrievers import BaseRetriever
+  from langchain_core.documents import Document
+  from langchain_core.callbacks import CallbackManagerForRetrieverRun
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_community.vectorstores import FAISS
+  from pydantic import Field
+  from typing import List
+  import json
+
+  class RerankedRetriever(BaseRetriever):
+      vectorstore: FAISS = Field(exclude=True)
+      llm: ChatOpenAI = Field(exclude=True)
+      top_k: int = 5
+      final_k: int = 3
+
+      class Config:
+          arbitrary_types_allowed = True
+
+      def _get_relevant_documents(
+          self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+      ) -> List[Document]:
+          # Stage 1: Retrieve candidates via vector search
+          candidates = self.vectorstore.similarity_search(query, k=self.top_k)
+
+          if not candidates:
+              return []
+
+          # Stage 2: LLM-based reranking
+          rerank_prompt = ChatPromptTemplate.from_messages([
+              ("system",
+               "Score the relevance of the document to the query on a scale "
+               "of 0-10. Respond with only the numeric score."),
+              ("human",
+               "Query: {query}\nDocument: {document}\nRelevance score (0-10):")
+          ])
+          rerank_chain = rerank_prompt | self.llm | StrOutputParser()
+
+          scored_docs = []
+          for doc in candidates:
+              try:
+                  score_str = rerank_chain.invoke({
+                      "query": query,
+                      "document": doc.page_content
+                  })
+                  score = float(score_str.strip())
+              except (ValueError, TypeError):
+                  score = 5.0  # Default score on parsing failure
+
+              doc.metadata["rerank_score"] = score
+              scored_docs.append((score, doc))
+
+          # Sort by score descending and return top final_k
+          scored_docs.sort(key=lambda x: x[0], reverse=True)
+          return [doc for _, doc in scored_docs[:self.final_k]]
+
+  def build_reranked_retriever(documents: list[Document]) -> RerankedRetriever:
+      """Build and return a reranked retriever from documents."""
+      embeddings = OpenAIEmbeddings()
+      vectorstore = FAISS.from_documents(documents, embeddings)
+      llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+      return RerankedRetriever(
+          vectorstore=vectorstore,
+          llm=llm,
+          top_k=min(5, len(documents)),
+          final_k=min(3, len(documents)),
+      )
+
+constraints:
+  - "Must extend BaseRetriever from langchain_core"
+  - "Must implement _get_relevant_documents method"
+  - "Must use two-stage retrieval: vector search then LLM reranking"
+  - "Must store reranking scores in document metadata"
+  - "Must be composable with LCEL chains (works with invoke())"

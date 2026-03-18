@@ -1,0 +1,160 @@
+id: "soc-004-router-chain"
+title: "Build a Semantic Router with LCEL"
+description: |
+  Build a semantic router that directs user queries to specialized chains
+  based on the query's intent. Instead of keyword matching, use embeddings
+  to determine which specialized chain should handle the query.
+
+  Your router should:
+  1. Have 3 specialized chains: code_helper, math_solver, and creative_writer
+  2. Use embedding similarity to classify the intent of incoming queries
+  3. Route to the appropriate chain
+  4. Return the response along with which route was selected
+
+  This tests your understanding of RunnableBranch, embedding-based routing,
+  and how to build flexible LCEL pipelines that adapt to input.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "socratic"
+category: "training"
+tags: ["routing", "runnable-branch", "embeddings", "lcel"]
+estimated_minutes: 25
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnableBranch, RunnableLambda, RunnablePassthrough
+  import numpy as np
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+  parser = StrOutputParser()
+  embeddings = OpenAIEmbeddings()
+
+  # Route descriptions for embedding-based classification
+  route_descriptions = {
+      "code": "programming, coding, debugging, software development, algorithms",
+      "math": "mathematics, calculation, equation, algebra, statistics",
+      "creative": "writing, story, poem, creative, imagination",
+  }
+
+  # TODO: Create specialized chains for each route
+
+  # TODO: Build the embedding-based classifier
+
+  # TODO: Use RunnableBranch or custom routing to select the right chain
+
+  def route_and_respond(query: str) -> dict:
+      """Route the query and return {route: str, response: str}."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clean separation between routing logic and specialized chains"
+      - "Route descriptions are meaningful and cover distinct intents"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses embeddings for semantic similarity routing (not keyword matching)"
+      - "Correctly uses RunnableBranch or conditional logic in LCEL"
+      - "Each specialized chain has an appropriate system prompt"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles ambiguous queries by falling back to a default route"
+      - "Returns both the route and response for observability"
+
+socratic_questions:
+  - "Why use embedding similarity for routing instead of keyword matching or an LLM classifier?"
+  - "How does RunnableBranch differ from add_conditional_edges in LangGraph?"
+  - "What are the latency implications of computing embeddings for every query?"
+  - "How would you add a new route without modifying the existing chains?"
+
+test_cases:
+  - name: "Test code query routing"
+    code: |
+      result = route_and_respond("How do I reverse a linked list in Python?")
+      assert result["route"] == "code"
+      assert len(result["response"]) > 10
+
+  - name: "Test math query routing"
+    code: |
+      result = route_and_respond("What is the integral of x squared?")
+      assert result["route"] == "math"
+
+  - name: "Test creative query routing"
+    code: |
+      result = route_and_respond("Write me a short poem about the ocean")
+      assert result["route"] == "creative"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+  import numpy as np
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+  parser = StrOutputParser()
+  embeddings = OpenAIEmbeddings()
+
+  route_descriptions = {
+      "code": "programming, coding, debugging, software development, algorithms",
+      "math": "mathematics, calculation, equation, algebra, statistics",
+      "creative": "writing, story, poem, creative, imagination",
+  }
+
+  # Pre-compute route embeddings
+  route_names = list(route_descriptions.keys())
+  route_texts = list(route_descriptions.values())
+  route_embeddings = embeddings.embed_documents(route_texts)
+
+  # Specialized chains
+  code_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are an expert programmer. Provide clear code examples and explanations."),
+      ("human", "{query}")
+  ])
+  code_chain = code_prompt | model | parser
+
+  math_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a math tutor. Show your work step by step."),
+      ("human", "{query}")
+  ])
+  math_chain = math_prompt | model | parser
+
+  creative_prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a creative writer. Be imaginative and expressive."),
+      ("human", "{query}")
+  ])
+  creative_chain = creative_prompt | model | parser
+
+  chains = {"code": code_chain, "math": math_chain, "creative": creative_chain}
+
+  def classify_route(query: str) -> str:
+      """Classify the query using embedding similarity."""
+      query_embedding = embeddings.embed_query(query)
+      similarities = [
+          np.dot(query_embedding, route_emb) / (
+              np.linalg.norm(query_embedding) * np.linalg.norm(route_emb)
+          )
+          for route_emb in route_embeddings
+      ]
+      best_idx = int(np.argmax(similarities))
+      return route_names[best_idx]
+
+  def route_and_respond(query: str) -> dict:
+      """Route the query and return {route: str, response: str}."""
+      route = classify_route(query)
+      chain = chains[route]
+      response = chain.invoke({"query": query})
+      return {"route": route, "response": response}
+
+constraints:
+  - "Must use embedding similarity for routing, not keyword matching"
+  - "Must have at least 3 specialized chains"
+  - "Must return both the selected route and the response"
+  - "Must use LCEL pipe syntax for all chains"

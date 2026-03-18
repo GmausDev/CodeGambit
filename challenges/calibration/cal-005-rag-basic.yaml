@@ -1,0 +1,185 @@
+id: "cal-005-rag-basic"
+title: "Build a Basic RAG Pipeline"
+description: |
+  Retrieval-Augmented Generation (RAG) is one of the most important patterns in
+  LangChain. In this challenge, you will build a complete RAG pipeline that:
+
+  1. Loads a set of text documents
+  2. Splits them into chunks using a text splitter
+  3. Creates embeddings and stores them in an in-memory vector store
+  4. Retrieves relevant chunks for a user question
+  5. Passes the retrieved context plus the question to an LLM for answering
+
+  This tests your understanding of the core RAG components: document loaders,
+  text splitters, embeddings, vector stores, and retrieval chains.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "advanced"
+elo_band: 1200
+mode: "socratic"
+category: "calibration"
+tags: ["rag", "retrieval", "embeddings", "vector-store", "text-splitting"]
+estimated_minutes: 25
+
+starter_code: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langchain_core.documents import Document
+
+  # Sample documents to index
+  DOCUMENTS = [
+      Document(page_content="LangChain is a framework for building LLM applications. "
+               "It provides abstractions for chains, agents, and retrieval."),
+      Document(page_content="LCEL (LangChain Expression Language) uses the pipe operator "
+               "to compose runnables. Each runnable transforms input to output."),
+      Document(page_content="Vector stores like FAISS and Chroma store document embeddings "
+               "for similarity search. They are core to RAG pipelines."),
+      Document(page_content="Text splitters break large documents into smaller chunks. "
+               "RecursiveCharacterTextSplitter is the most commonly used."),
+      Document(page_content="Embeddings convert text into numerical vectors. OpenAI's "
+               "text-embedding-ada-002 is widely used for this purpose."),
+  ]
+
+  def build_rag_chain():
+      """Build and return a complete RAG chain."""
+      # TODO: Split documents using RecursiveCharacterTextSplitter
+      #       (chunk_size=200, chunk_overlap=50)
+
+      # TODO: Create FAISS vector store from the split documents
+      #       using OpenAIEmbeddings
+
+      # TODO: Create a retriever from the vector store (k=2)
+
+      # TODO: Create a RAG prompt template
+
+      # TODO: Build the RAG chain using LCEL:
+      #       {"context": retriever, "question": RunnablePassthrough()}
+      #       | prompt | model | parser
+
+      pass
+
+  def ask(question: str) -> str:
+      """Ask a question against the document store."""
+      chain = build_rag_chain()
+      # TODO: invoke and return
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Properly splits documents before indexing (not storing whole docs)"
+      - "Creates vector store and retriever as separate, composable components"
+      - "RAG prompt clearly separates context from question"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses RecursiveCharacterTextSplitter with appropriate chunk settings"
+      - "Uses FAISS.from_documents() with OpenAIEmbeddings"
+      - "Builds retrieval chain with LCEL using RunnablePassthrough for the question"
+      - "Formats retrieved documents into a context string"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Retriever returns appropriate number of results (k=2)"
+      - "Context formatting handles multiple documents cleanly"
+
+socratic_questions:
+  - "Why do we split documents into chunks rather than embedding entire documents? What are the trade-offs with chunk size?"
+  - "How does the retriever decide which chunks are most relevant to a question?"
+  - "What is the role of RunnablePassthrough in the RAG chain, and why is it needed?"
+  - "How would you evaluate whether your RAG pipeline is returning good answers? What metrics would you use?"
+  - "What would change if you replaced FAISS with a persistent vector store like Chroma?"
+
+test_cases:
+  - name: "Test RAG chain returns an answer"
+    code: |
+      result = ask("What is LCEL?")
+      assert isinstance(result, str), "Must return a string"
+      assert len(result) > 10, "Answer should be substantive"
+
+  - name: "Test RAG chain uses retrieval"
+    code: |
+      # The answer about LCEL should reference pipe operator or runnables
+      result = ask("What is LCEL and how does it work?")
+      result_lower = result.lower()
+      assert "pipe" in result_lower or "runnable" in result_lower or "compose" in result_lower, \
+          "Answer should reflect retrieved content about LCEL"
+
+  - name: "Test chain is a proper Runnable"
+    code: |
+      from langchain_core.runnables import Runnable
+      chain = build_rag_chain()
+      assert isinstance(chain, Runnable), "build_rag_chain must return a Runnable"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnablePassthrough
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langchain_core.documents import Document
+
+  DOCUMENTS = [
+      Document(page_content="LangChain is a framework for building LLM applications. "
+               "It provides abstractions for chains, agents, and retrieval."),
+      Document(page_content="LCEL (LangChain Expression Language) uses the pipe operator "
+               "to compose runnables. Each runnable transforms input to output."),
+      Document(page_content="Vector stores like FAISS and Chroma store document embeddings "
+               "for similarity search. They are core to RAG pipelines."),
+      Document(page_content="Text splitters break large documents into smaller chunks. "
+               "RecursiveCharacterTextSplitter is the most commonly used."),
+      Document(page_content="Embeddings convert text into numerical vectors. OpenAI's "
+               "text-embedding-ada-002 is widely used for this purpose."),
+  ]
+
+  def format_docs(docs):
+      return "\n\n".join(doc.page_content for doc in docs)
+
+  def build_rag_chain():
+      """Build and return a complete RAG chain."""
+      # Split documents
+      splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
+      splits = splitter.split_documents(DOCUMENTS)
+
+      # Create vector store and retriever
+      embeddings = OpenAIEmbeddings()
+      vectorstore = FAISS.from_documents(splits, embeddings)
+      retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+
+      # RAG prompt
+      prompt = ChatPromptTemplate.from_messages([
+          ("system",
+           "Answer the question based only on the following context:\n\n{context}\n\n"
+           "If the context doesn't contain the answer, say so."),
+          ("human", "{question}")
+      ])
+
+      model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+      parser = StrOutputParser()
+
+      # Build the RAG chain
+      chain = (
+          {"context": retriever | format_docs, "question": RunnablePassthrough()}
+          | prompt
+          | model
+          | parser
+      )
+      return chain
+
+  def ask(question: str) -> str:
+      """Ask a question against the document store."""
+      chain = build_rag_chain()
+      return chain.invoke(question)
+
+constraints:
+  - "Must use RecursiveCharacterTextSplitter for document splitting"
+  - "Must use FAISS as the vector store"
+  - "Must use OpenAIEmbeddings"
+  - "Must use LCEL pipe syntax for the full chain"
+  - "Must format retrieved documents into a context string"

@@ -1,0 +1,117 @@
+id: "cal-001-hello-langchain"
+title: "Hello LangChain: Your First Chat Chain"
+description: |
+  Build your first LangChain application from scratch. You will create a simple
+  chain that takes a user's name and a programming language, then generates a
+  personalized greeting with a fun fact about that language.
+
+  This challenge tests whether you understand the foundational building blocks:
+  - How to construct a `ChatPromptTemplate` with multiple variables
+  - How to initialize and configure a chat model
+  - How to compose a chain using LCEL pipe syntax
+  - How to invoke a chain with a dictionary of inputs
+
+  Your chain should accept `{name}` and `{language}` as template variables.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "beginner"
+elo_band: 800
+mode: "socratic"
+category: "calibration"
+tags: ["llm", "chat-model", "prompt-template", "lcel", "basics"]
+estimated_minutes: 10
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+
+  def build_greeting_chain():
+      """Build and return a chain that generates personalized greetings."""
+      # TODO: Create a ChatPromptTemplate with system and human messages
+      # System: "You are a friendly programming mentor."
+      # Human: "Hi, my name is {name} and I'm learning {language}.
+      #         Give me a warm greeting and one fun fact about {language}."
+
+      # TODO: Initialize ChatOpenAI with model="gpt-4o-mini", temperature=0.7
+
+      # TODO: Chain prompt | model using LCEL and return the chain
+      pass
+
+  def greet(name: str, language: str) -> str:
+      """Invoke the chain and return the greeting text."""
+      chain = build_greeting_chain()
+      # TODO: Invoke the chain with the right input dict and return .content
+      pass
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Uses ChatPromptTemplate.from_messages() with system and human message tuple format"
+      - "Separates chain construction from invocation"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses LCEL pipe syntax to compose prompt and model"
+      - "Correctly passes a dict with name and language keys to invoke()"
+      - "Extracts .content from the AIMessage result"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "No deprecated API usage (no LLMChain, no PromptTemplate)"
+      - "Clean function signatures with type hints"
+
+socratic_questions:
+  - "Why does LangChain use ChatPromptTemplate.from_messages() with tuples instead of a single format string?"
+  - "What happens internally when you use the pipe operator between a prompt and a model?"
+  - "How would you add an output parser to this chain to automatically extract the string content?"
+  - "What is the difference between invoke(), batch(), and stream() on a Runnable?"
+
+test_cases:
+  - name: "Test chain construction returns a Runnable"
+    code: |
+      from langchain_core.runnables import Runnable
+      chain = build_greeting_chain()
+      assert isinstance(chain, Runnable), "build_greeting_chain must return a Runnable"
+
+  - name: "Test chain accepts correct input variables"
+    code: |
+      chain = build_greeting_chain()
+      schema = chain.input_schema.model_json_schema()
+      props = schema.get("properties", {})
+      assert "name" in props, "Chain must accept 'name' as input"
+      assert "language" in props, "Chain must accept 'language' as input"
+
+  - name: "Test greet returns a non-empty string"
+    code: |
+      result = greet("Alice", "Python")
+      assert isinstance(result, str), "greet() must return a string"
+      assert len(result) > 10, "Greeting should be substantive"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+
+  def build_greeting_chain():
+      """Build and return a chain that generates personalized greetings."""
+      prompt = ChatPromptTemplate.from_messages([
+          ("system", "You are a friendly programming mentor."),
+          ("human",
+           "Hi, my name is {name} and I'm learning {language}. "
+           "Give me a warm greeting and one fun fact about {language}.")
+      ])
+      model = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+      chain = prompt | model
+      return chain
+
+  def greet(name: str, language: str) -> str:
+      """Invoke the chain and return the greeting text."""
+      chain = build_greeting_chain()
+      result = chain.invoke({"name": name, "language": language})
+      return result.content
+
+constraints:
+  - "Must use LCEL pipe syntax"
+  - "Must use ChatPromptTemplate, not PromptTemplate"
+  - "Must use ChatOpenAI from langchain_openai"
+  - "No deprecated APIs"

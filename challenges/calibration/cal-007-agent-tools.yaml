@@ -1,0 +1,176 @@
+id: "cal-007-agent-tools"
+title: "Build a ReAct Agent with Custom Tools"
+description: |
+  Build a ReAct agent using LangGraph's `create_react_agent` that can use
+  custom tools to answer questions. Your agent will have access to a calculator
+  tool and a weather lookup tool.
+
+  This challenge tests your understanding of:
+  - Defining tools with the `@tool` decorator and proper docstrings
+  - Using `create_react_agent` from LangGraph (not the deprecated AgentExecutor)
+  - Invoking the agent with proper message format
+  - Understanding how the agent decides which tool to call
+
+  The agent should be able to handle questions that require one or both tools,
+  as well as questions that need no tools at all.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "collaborative"
+category: "calibration"
+tags: ["agents", "tools", "react", "langgraph", "create-react-agent"]
+estimated_minutes: 25
+
+steps:
+  - id: "step-1"
+    title: "Define Custom Tools"
+    description: |
+      Create two tools using the `@tool` decorator:
+      1. `calculate` — evaluates a math expression string and returns the result
+      2. `get_weather` — takes a city name and returns mock weather data
+      Each tool must have a clear docstring (the agent uses it to decide when to call the tool).
+  - id: "step-2"
+    title: "Create the ReAct Agent"
+    description: |
+      Use `create_react_agent` from `langgraph.prebuilt` to create an agent
+      with your tools and a ChatOpenAI model. This returns a compiled LangGraph
+      that implements the ReAct loop.
+  - id: "step-3"
+    title: "Invoke the Agent"
+    description: |
+      Write a function that invokes the agent with a user question. The input
+      format for LangGraph agents is `{"messages": [("user", question)]}`.
+      Extract the final AI response from the output messages.
+  - id: "step-4"
+    title: "Handle Multi-Tool Queries"
+    description: |
+      Test that the agent can handle queries requiring multiple tool calls,
+      like "What's the weather in Paris and what is 72 * 1.8 + 32?"
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langgraph.prebuilt import create_react_agent
+
+  # Step 1: Define tools
+  # TODO: @tool decorator with proper docstring
+
+  # Step 2: Create agent
+  # TODO: create_react_agent(model, tools)
+
+  # Step 3: Invoke
+  def ask_agent(question: str) -> str:
+      """Send a question to the agent and return the final response."""
+      # TODO
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Tools are properly defined with @tool decorator and descriptive docstrings"
+      - "Agent is created with create_react_agent, not AgentExecutor"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Uses langgraph.prebuilt.create_react_agent correctly"
+      - "Input is formatted as messages list for the LangGraph agent"
+      - "Correctly extracts the final AI message from the agent output"
+      - "Tool docstrings are specific enough for the agent to make correct tool choices"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Calculator handles basic arithmetic safely (no eval of arbitrary code)"
+      - "Agent handles queries requiring zero, one, or multiple tool calls"
+
+socratic_questions:
+  - "How does the ReAct agent decide which tool to call? What role do tool docstrings play?"
+  - "What is the difference between create_react_agent (LangGraph) and the deprecated AgentExecutor?"
+  - "How would you add error handling for when a tool call fails mid-execution?"
+  - "What does the agent's message history look like after a multi-tool query?"
+
+test_cases:
+  - name: "Test agent answers a simple question without tools"
+    code: |
+      result = ask_agent("What is the capital of France?")
+      assert isinstance(result, str), "Must return a string"
+      assert "paris" in result.lower(), "Should answer correctly"
+
+  - name: "Test agent uses calculator tool"
+    code: |
+      result = ask_agent("What is 145 * 37?")
+      assert "5365" in result, "Should compute 145*37=5365"
+
+  - name: "Test agent uses weather tool"
+    code: |
+      result = ask_agent("What's the weather in Tokyo?")
+      assert isinstance(result, str)
+      assert len(result) > 5, "Should return weather info"
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.tools import tool
+  from langgraph.prebuilt import create_react_agent
+
+  @tool
+  def calculate(expression: str) -> str:
+      """Evaluate a mathematical expression and return the result.
+      Use this for any arithmetic calculations. Input should be a math
+      expression like '2 + 3 * 4' or '(10 / 2) ** 3'."""
+      import ast
+      import operator
+
+      ops = {
+          ast.Add: operator.add, ast.Sub: operator.sub,
+          ast.Mult: operator.mul, ast.Div: operator.truediv,
+          ast.Pow: operator.pow, ast.USub: operator.neg,
+      }
+
+      def _eval(node):
+          if isinstance(node, ast.Constant):
+              return node.value
+          elif isinstance(node, ast.BinOp):
+              return ops[type(node.op)](_eval(node.left), _eval(node.right))
+          elif isinstance(node, ast.UnaryOp):
+              return ops[type(node.op)](_eval(node.operand))
+          else:
+              raise ValueError(f"Unsupported expression: {ast.dump(node)}")
+
+      tree = ast.parse(expression, mode="eval")
+      result = _eval(tree.body)
+      return str(result)
+
+  @tool
+  def get_weather(city: str) -> str:
+      """Get the current weather for a given city.
+      Use this when the user asks about weather conditions.
+      Returns temperature and conditions for the specified city."""
+      # Mock weather data for demonstration
+      weather_data = {
+          "tokyo": "22°C, Partly Cloudy",
+          "paris": "18°C, Sunny",
+          "new york": "15°C, Rainy",
+          "london": "12°C, Overcast",
+      }
+      city_lower = city.lower().strip()
+      if city_lower in weather_data:
+          return f"Weather in {city}: {weather_data[city_lower]}"
+      return f"Weather in {city}: 20°C, Clear (data unavailable, showing default)"
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  tools = [calculate, get_weather]
+  agent = create_react_agent(model, tools)
+
+  def ask_agent(question: str) -> str:
+      """Send a question to the agent and return the final response."""
+      result = agent.invoke({"messages": [("user", question)]})
+      # The last message in the list is the final AI response
+      return result["messages"][-1].content
+
+constraints:
+  - "Must use create_react_agent from langgraph.prebuilt"
+  - "Must NOT use AgentExecutor (deprecated)"
+  - "Must define tools with @tool decorator"
+  - "Calculator must not use eval() — must safely parse math expressions"
+  - "Must handle multi-tool queries"

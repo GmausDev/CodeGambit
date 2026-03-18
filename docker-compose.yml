@@ -1,0 +1,27 @@
+services:
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./challenges:/app/challenges:ro
+    env_file: .env
+    depends_on:
+      - sandbox-builder
+
+  frontend:
+    build: ./frontend
+    command: npm run dev -- --host
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+
+  sandbox-builder:
+    build: ./docker/sandbox
+    image: codegambit-sandbox:latest
+    entrypoint: ["echo", "Sandbox image built"]

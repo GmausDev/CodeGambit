@@ -1,0 +1,305 @@
+id: "col-004-agentic-rag"
+title: "Build an Agentic RAG System"
+description: |
+  Build an agentic RAG system that goes beyond simple retrieve-and-answer.
+  Your system should be able to:
+
+  1. Decide whether a question needs retrieval or can be answered directly
+  2. Formulate better search queries from ambiguous user questions
+  3. Evaluate retrieved documents for relevance and re-query if needed
+  4. Synthesize answers from multiple retrieval rounds
+  5. Know when to say "I don't know" vs. when to search more
+
+  This is a LangGraph workflow that combines retrieval with agent-like
+  decision making — a pattern increasingly used in production RAG systems.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "expert"
+elo_band: 1400
+mode: "collaborative"
+category: "training"
+tags: ["rag", "agentic", "langgraph", "self-rag", "adaptive-retrieval"]
+estimated_minutes: 40
+
+steps:
+  - id: "step-1"
+    title: "Build the Knowledge Base"
+    description: |
+      Create a FAISS vector store from a set of documents about LangChain.
+      Include metadata for source tracking. Create a retriever that returns
+      top-3 results.
+  - id: "step-2"
+    title: "Build Decision Nodes"
+    description: |
+      Create three key nodes:
+      - query_analyzer: decides if retrieval is needed and rewrites the query
+      - relevance_checker: evaluates if retrieved docs answer the question
+      - generator: produces the final answer from context
+  - id: "step-3"
+    title: "Build the Adaptive RAG Graph"
+    description: |
+      Wire the nodes into a LangGraph:
+      - Start -> query_analyzer
+      - If retrieval needed -> retrieve -> relevance_check
+      - If relevant -> generate answer
+      - If not relevant -> rewrite query -> retrieve again (max 2 retries)
+      - If no retrieval needed -> generate directly
+  - id: "step-4"
+    title: "Add Grounding Checks"
+    description: |
+      After generation, add a hallucination check node that verifies the
+      answer is supported by the retrieved context. If not, regenerate.
+
+starter_code: |
+  from typing import TypedDict, Literal
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.documents import Document
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langgraph.graph import StateGraph, END
+
+  # TODO: Implement step by step
+
+rubric:
+  architecture:
+    weight: 0.30
+    criteria:
+      - "Clear decision flow: analyze -> retrieve -> check -> generate"
+      - "Separate nodes for query analysis, relevance checking, and generation"
+  framework_depth:
+    weight: 0.40
+    criteria:
+      - "Uses LangGraph with conditional edges for adaptive routing"
+      - "Query rewriting uses an LLM to improve search queries"
+      - "Relevance checking evaluates retrieval quality"
+      - "Max retry limit prevents infinite retrieval loops"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Handles questions that need retrieval and those that don't"
+      - "Grounding check catches hallucinated answers"
+
+socratic_questions:
+  - "How does the query analyzer decide whether retrieval is needed?"
+  - "What makes a good query rewrite? How is it different from the original question?"
+  - "How do you evaluate whether retrieved documents are relevant without an LLM?"
+  - "What are the latency implications of adding relevance checking and grounding checks?"
+
+test_cases:
+  - name: "Test answerable question"
+    code: |
+      result = ask("What is LCEL in LangChain?")
+      assert isinstance(result, dict)
+      assert len(result["answer"]) > 20
+      assert result["retrieval_used"] is True
+
+  - name: "Test grounding"
+    code: |
+      result = ask("What is LCEL?")
+      # Answer should be grounded in retrieved docs
+      assert result.get("grounded", False) or len(result["answer"]) > 10
+
+  - name: "Test direct answer (no retrieval needed)"
+    code: |
+      result = ask("What is 2 + 2?")
+      assert "4" in result["answer"]
+
+reference_solution: |
+  from typing import TypedDict, Literal
+  from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.documents import Document
+  from langchain_community.vectorstores import FAISS
+  from langchain_text_splitters import RecursiveCharacterTextSplitter
+  from langgraph.graph import StateGraph, END
+
+  model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  parser = StrOutputParser()
+
+  # Step 1: Knowledge base
+  kb_documents = [
+      Document(page_content="LCEL (LangChain Expression Language) is the primary way to compose chains in LangChain 0.3. It uses the pipe operator (|) to connect runnables into a sequence.", metadata={"source": "lcel-guide"}),
+      Document(page_content="RunnableWithMessageHistory replaces the deprecated ConversationBufferMemory. It wraps any runnable and manages message history per session.", metadata={"source": "memory-guide"}),
+      Document(page_content="create_react_agent from langgraph.prebuilt creates a ReAct agent. It replaces AgentExecutor. Tools need @tool decorator with clear docstrings.", metadata={"source": "agent-guide"}),
+      Document(page_content="RAG pipelines use vector stores for semantic search. FAISS and Chroma are popular choices. Documents must be split into chunks before embedding.", metadata={"source": "rag-guide"}),
+      Document(page_content="LangGraph is a framework for building stateful, multi-step LLM applications. It uses TypedDict for state and StateGraph for workflow definition.", metadata={"source": "langgraph-guide"}),
+  ]
+
+  splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
+  splits = splitter.split_documents(kb_documents)
+  embeddings = OpenAIEmbeddings()
+  vectorstore = FAISS.from_documents(splits, embeddings)
+  retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+  # State
+  class RAGState(TypedDict):
+      question: str
+      rewritten_query: str
+      documents: list[Document]
+      answer: str
+      needs_retrieval: bool
+      is_relevant: bool
+      grounded: bool
+      retrieval_used: bool
+      retries: int
+
+  # Step 2: Decision nodes
+  analyze_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Determine if this question needs document retrieval to answer. "
+       "If it's a simple factual/math question, respond 'NO'. "
+       "If it needs specific knowledge about LangChain/LLMs, respond 'YES'. "
+       "Then on a new line, provide an optimized search query."),
+      ("human", "{question}")
+  ])
+  analyze_chain = analyze_prompt | model | parser
+
+  def query_analyzer(state: RAGState) -> dict:
+      result = analyze_chain.invoke({"question": state["question"]})
+      lines = result.strip().split("\n")
+      needs = "yes" in lines[0].lower() if lines else True
+      query = lines[1].strip() if len(lines) > 1 else state["question"]
+      return {"needs_retrieval": needs, "rewritten_query": query}
+
+  def retrieve_node(state: RAGState) -> dict:
+      query = state.get("rewritten_query") or state["question"]
+      docs = retriever.invoke(query)
+      return {"documents": docs, "retrieval_used": True}
+
+  relevance_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Evaluate if the documents are relevant to answering the question. "
+       "Respond with only YES or NO."),
+      ("human", "Question: {question}\nDocuments: {docs}")
+  ])
+  relevance_chain = relevance_prompt | model | parser
+
+  def relevance_checker(state: RAGState) -> dict:
+      docs_text = "\n".join(d.page_content for d in state.get("documents", []))
+      result = relevance_chain.invoke({
+          "question": state["question"],
+          "docs": docs_text
+      })
+      return {"is_relevant": "yes" in result.strip().lower()}
+
+  # Generator
+  gen_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Answer the question based on the context. If context is provided, "
+       "use it. If not, answer from your knowledge. Be concise and accurate."),
+      ("human", "Context: {context}\n\nQuestion: {question}")
+  ])
+  gen_chain = gen_prompt | model | parser
+
+  def generate_node(state: RAGState) -> dict:
+      context = "\n".join(d.page_content for d in state.get("documents", []))
+      answer = gen_chain.invoke({
+          "context": context or "No context available.",
+          "question": state["question"]
+      })
+      return {"answer": answer}
+
+  # Grounding check
+  ground_prompt = ChatPromptTemplate.from_messages([
+      ("system",
+       "Check if the answer is supported by the context. "
+       "Respond with only YES or NO."),
+      ("human", "Context: {context}\nAnswer: {answer}")
+  ])
+  ground_chain = ground_prompt | model | parser
+
+  def grounding_check(state: RAGState) -> dict:
+      if not state.get("retrieval_used"):
+          return {"grounded": True}
+      context = "\n".join(d.page_content for d in state.get("documents", []))
+      result = ground_chain.invoke({
+          "context": context,
+          "answer": state["answer"]
+      })
+      return {"grounded": "yes" in result.strip().lower()}
+
+  def rewrite_query(state: RAGState) -> dict:
+      rewrite_prompt = ChatPromptTemplate.from_messages([
+          ("system", "Rewrite this search query to get better results. Return only the new query."),
+          ("human", "{query}")
+      ])
+      chain = rewrite_prompt | model | parser
+      new_query = chain.invoke({"query": state["rewritten_query"]})
+      return {"rewritten_query": new_query.strip(), "retries": state.get("retries", 0) + 1}
+
+  # Routing functions
+  def needs_retrieval_router(state: RAGState) -> str:
+      return "retrieve" if state["needs_retrieval"] else "generate"
+
+  def relevance_router(state: RAGState) -> str:
+      if state["is_relevant"]:
+          return "generate"
+      elif state.get("retries", 0) >= 2:
+          return "generate"  # Give up and generate with what we have
+      else:
+          return "rewrite"
+
+  def grounding_router(state: RAGState) -> str:
+      if state["grounded"]:
+          return "done"
+      else:
+          return "regenerate"
+
+  # Build graph
+  graph = StateGraph(RAGState)
+
+  graph.add_node("analyze", query_analyzer)
+  graph.add_node("retrieve", retrieve_node)
+  graph.add_node("check_relevance", relevance_checker)
+  graph.add_node("generate", generate_node)
+  graph.add_node("check_grounding", grounding_check)
+  graph.add_node("rewrite", rewrite_query)
+
+  graph.set_entry_point("analyze")
+
+  graph.add_conditional_edges("analyze", needs_retrieval_router, {
+      "retrieve": "retrieve",
+      "generate": "generate",
+  })
+  graph.add_edge("retrieve", "check_relevance")
+  graph.add_conditional_edges("check_relevance", relevance_router, {
+      "generate": "generate",
+      "rewrite": "rewrite",
+  })
+  graph.add_edge("rewrite", "retrieve")
+  graph.add_edge("generate", "check_grounding")
+  graph.add_conditional_edges("check_grounding", grounding_router, {
+      "done": END,
+      "regenerate": "generate",  # Simple retry
+  })
+
+  app = graph.compile()
+
+  def ask(question: str) -> dict:
+      result = app.invoke({
+          "question": question,
+          "rewritten_query": "",
+          "documents": [],
+          "answer": "",
+          "needs_retrieval": False,
+          "is_relevant": False,
+          "grounded": False,
+          "retrieval_used": False,
+          "retries": 0,
+      })
+      return {
+          "answer": result["answer"],
+          "retrieval_used": result["retrieval_used"],
+          "grounded": result["grounded"],
+          "retries": result.get("retries", 0),
+      }
+
+constraints:
+  - "Must use LangGraph StateGraph"
+  - "Must have query analysis, retrieval, relevance checking, and grounding"
+  - "Must support questions that don't need retrieval"
+  - "Must retry retrieval with rewritten query (max 2 retries)"
+  - "Must include grounding check on generated answers"

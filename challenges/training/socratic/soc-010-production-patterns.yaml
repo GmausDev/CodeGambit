@@ -1,0 +1,142 @@
+id: "soc-010-production-patterns"
+title: "Production Patterns: Fallbacks, Retries, and Rate Limiting"
+description: |
+  Build production-hardened LCEL chains using LangChain's built-in resilience
+  patterns. In production, LLM calls fail — models go down, rate limits hit,
+  responses are malformed. Your code must handle all of this gracefully.
+
+  You will implement:
+  1. `.with_retry()` for automatic retry with exponential backoff
+  2. `.with_fallbacks()` to fall back to a cheaper model on failure
+  3. `.batch()` with `max_concurrency` for rate limiting
+  4. A combined pattern that chains all three together
+
+  This tests your understanding of LangChain's production primitives and
+  how to compose them for reliable LLM applications.
+domain: "langchain"
+domain_version: "0.3.x"
+difficulty: "master"
+elo_band: 1600
+mode: "socratic"
+category: "training"
+tags: ["production", "retry", "fallback", "rate-limiting", "reliability"]
+estimated_minutes: 25
+
+starter_code: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+  from langchain_core.runnables import RunnableConfig
+
+  # TODO: Create a primary chain with GPT-4o
+
+  # TODO: Create a fallback chain with GPT-4o-mini
+
+  # TODO: Add .with_retry() for automatic retry
+
+  # TODO: Add .with_fallbacks() to fall back to cheaper model
+
+  # TODO: Implement batch processing with rate limiting
+
+  def resilient_invoke(query: str) -> str:
+      """Invoke with retry + fallback."""
+      pass
+
+  def batch_with_rate_limit(queries: list[str], max_concurrent: int = 3) -> list[str]:
+      """Process multiple queries with concurrency control."""
+      pass
+
+rubric:
+  architecture:
+    weight: 0.25
+    criteria:
+      - "Primary and fallback models are clearly separated"
+      - "Retry, fallback, and rate limiting are layered correctly"
+  framework_depth:
+    weight: 0.45
+    criteria:
+      - "Uses .with_retry() with proper retry configuration"
+      - "Uses .with_fallbacks() with a list of fallback chains"
+      - "Uses .batch() with max_concurrency for rate limiting"
+      - "Understands the order: retry wraps the primary, fallback wraps the retried version"
+  complexity_mgmt:
+    weight: 0.30
+    criteria:
+      - "Retry has reasonable settings (max attempts, wait time)"
+      - "Batch processing respects concurrency limits"
+
+socratic_questions:
+  - "In what order should you apply retry and fallback? Why does it matter?"
+  - "How does with_retry() determine which exceptions to retry on?"
+  - "What are the trade-offs between retrying with the same model vs. falling back to a different one?"
+  - "How would you implement a token budget that limits total spend across retries and fallbacks?"
+  - "When would batch() with max_concurrency be better than asyncio.gather()?"
+
+test_cases:
+  - name: "Test resilient_invoke returns a response"
+    code: |
+      result = resilient_invoke("What is 2+2?")
+      assert isinstance(result, str)
+      assert len(result) > 0
+
+  - name: "Test batch processing returns correct count"
+    code: |
+      queries = ["Hello", "Hi", "Hey"]
+      results = batch_with_rate_limit(queries, max_concurrent=2)
+      assert len(results) == 3
+      assert all(isinstance(r, str) for r in results)
+
+  - name: "Test chain has fallback configured"
+    code: |
+      # The chain should have fallback metadata
+      assert hasattr(chain_with_fallback, 'first') or hasattr(chain_with_fallback, 'fallbacks')
+
+reference_solution: |
+  from langchain_openai import ChatOpenAI
+  from langchain_core.prompts import ChatPromptTemplate
+  from langchain_core.output_parsers import StrOutputParser
+
+  prompt = ChatPromptTemplate.from_messages([
+      ("system", "You are a helpful assistant. Be concise."),
+      ("human", "{query}")
+  ])
+  parser = StrOutputParser()
+
+  # Primary chain with GPT-4o
+  primary_model = ChatOpenAI(model="gpt-4o", temperature=0)
+  primary_chain = prompt | primary_model | parser
+
+  # Fallback chain with GPT-4o-mini (cheaper, more available)
+  fallback_model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  fallback_chain = prompt | fallback_model | parser
+
+  # Add retry to primary chain
+  primary_with_retry = primary_chain.with_retry(
+      stop_after_attempt=3,
+      wait_exponential_jitter=True,
+  )
+
+  # Add fallback: try primary (with retry) first, then fall back
+  chain_with_fallback = primary_with_retry.with_fallbacks(
+      fallbacks=[fallback_chain],
+  )
+
+  def resilient_invoke(query: str) -> str:
+      """Invoke with retry + fallback."""
+      return chain_with_fallback.invoke({"query": query})
+
+  def batch_with_rate_limit(queries: list[str], max_concurrent: int = 3) -> list[str]:
+      """Process multiple queries with concurrency control."""
+      inputs = [{"query": q} for q in queries]
+      results = chain_with_fallback.batch(
+          inputs,
+          config={"max_concurrency": max_concurrent},
+      )
+      return results
+
+constraints:
+  - "Must use .with_retry() for automatic retry"
+  - "Must use .with_fallbacks() for model fallback"
+  - "Must use .batch() with max_concurrency for rate limiting"
+  - "Primary model must be GPT-4o, fallback must be GPT-4o-mini"
+  - "Retry must use exponential backoff"
